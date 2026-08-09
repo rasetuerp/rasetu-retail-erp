@@ -230,7 +230,13 @@ ipcMain.handle('rt:printer-test-connection', async (_event, printerName: string)
 ipcMain.handle('rt:printer-config-get', async () => readPrinterConfig());
 ipcMain.handle('rt:printer-config-save', async (_event, role: keyof PrinterConfig, patch: Record<string, unknown>) => {
   const config = readPrinterConfig();
-  (config as any)[role] = { ...(config as any)[role], ...patch };
+  if (role === 'receipt') {
+    config.receipt = { ...config.receipt, ...patch } as PrinterConfig['receipt'];
+  } else if (role === 'label') {
+    config.label = { ...config.label, ...patch } as PrinterConfig['label'];
+  } else {
+    config.invoice = { ...config.invoice, ...patch } as PrinterConfig['invoice'];
+  }
   writePrinterConfig(config);
   // Keep the receipt PrinterManager's in-memory printer name in sync so a
   // saved name takes effect without requiring an app restart (label already
