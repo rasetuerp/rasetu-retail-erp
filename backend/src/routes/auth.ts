@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 
-import { getCompanyClient } from '../db/company-registry.js';
+import { getReadyCompanyClient } from '../db/company-registry.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import { verifyPassword, hashPassword } from '../lib/password.js';
 import { signAuthToken } from '../lib/jwt.js';
@@ -37,7 +37,7 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     const input = loginSchema.parse(req.body);
     await ensureCompanyStorageAvailable(req.params.companyId);
-    const prisma = getCompanyClient(req.params.companyId);
+    const prisma = await getReadyCompanyClient(req.params.companyId);
 
     const user = await prisma.user.findUnique({ where: { username: input.username } });
     if (!user || user.companyId !== req.params.companyId || !user.isActive) {
@@ -89,7 +89,7 @@ authRouter.post(
     }
 
     await ensureCompanyStorageAvailable(req.params.companyId);
-    const prisma = getCompanyClient(req.params.companyId);
+    const prisma = await getReadyCompanyClient(req.params.companyId);
     const user = await prisma.user.findUnique({ where: { id: input.userId } });
     if (!user || user.companyId !== req.params.companyId || !user.isActive || !user.pinHash) {
       throw new HttpError(401, 'PIN login is not available for this account.');
@@ -171,7 +171,7 @@ authRouter.post(
     }
 
     await ensureCompanyStorageAvailable(req.params.companyId);
-    const prisma = getCompanyClient(req.params.companyId);
+    const prisma = await getReadyCompanyClient(req.params.companyId);
     const user = await prisma.user.findUnique({ where: { username: input.username } });
     if (!user || user.companyId !== req.params.companyId || !user.isActive) {
       throw new HttpError(404, 'Could not find that user in this shop.');

@@ -1,5 +1,6 @@
 import { prisma as catalogPrisma } from '../db/catalog-client.js';
-import { getCompanyClient } from '../db/company-registry.js';
+import { getReadyCompanyClient } from '../db/company-registry.js';
+import { resolveExternalCompanyPath, type CompanyStorageRow } from './company-storage.js';
 import { readLicenseKey } from './license-snapshot.js';
 
 // Round 4 — one-way push (backup to cloud), deliberately minimal, matching
@@ -13,7 +14,7 @@ const POLL_INTERVAL_MS = 60_000;
 const BATCH_SIZE = 100;
 
 async function pushCompany(companyId: string, licenseKey: string): Promise<void> {
-  const db = getCompanyClient(companyId);
+  const db = await getReadyCompanyClient(companyId);
   const unsynced = await db.syncQueue.findMany({
     where: { synced: false },
     take: BATCH_SIZE,
@@ -49,10 +50,14 @@ async function tick(): Promise<void> {
   if (!licenseKey) return;
 
   try {
-    const companies = await catalogPrisma.company.findMany({ select: { id: true } });
-    for (const { id } of companies) {
-      await pushCompany(id, licenseKey).catch((err: unknown) => {
-        console.error(`[sync-worker] push failed for company ${id}:`, err);
+    const companies = await catalogPrisma.company.findMany({
+      select: { id: true, storageType: true, dbDir: true, volumeId: true },
+    });
+    for (const company of companies) {
+      const availability = await resolveExternalCompanyPath(company as CompanyStorageRow);
+      if (!availability.available) continue;
+      await pushCompany(company.id, licenseKey).catch((err: unknown) => {
+        console.error(`[sync-worker] push failed for company ${company.id}:`, err);
       });
     }
   } catch (err) {

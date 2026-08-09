@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 
 import { prisma } from '../db/catalog-client.js';
-import { getCompanyClient, resetCompanyClient } from '../db/company-registry.js';
+import { getReadyCompanyClient, resetCompanyClient } from '../db/company-registry.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import { supabase } from '../lib/supabase-client.js';
 import { signAuthToken, verifyAuthToken } from '../lib/jwt.js';
@@ -101,7 +101,7 @@ authSuperRouter.post(
     // entity writes (RULES.md #7); this is an access event, so it gets its
     // own AuditLog row with a distinct, greppable action. AuditLog lives
     // inside the entered company's own database (Round 4), not the catalog.
-    const companyDb = getCompanyClient(company.id);
+    const companyDb = await getReadyCompanyClient(company.id);
     await companyDb.auditLog.create({
       data: {
         userId: payload.sub,

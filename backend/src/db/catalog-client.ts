@@ -40,6 +40,18 @@ export const prisma =
     datasources: { db: { url: `file:${catalogDbPath}` } },
   });
 
+let catalogReady: Promise<void> | null = null;
+
+export function configureCatalogClient(): Promise<void> {
+  catalogReady ??= (async () => {
+    await prisma.$executeRawUnsafe('PRAGMA busy_timeout = 10000');
+    await prisma.$executeRawUnsafe('PRAGMA journal_mode = WAL');
+    await prisma.$executeRawUnsafe('PRAGMA synchronous = NORMAL');
+    await prisma.$executeRawUnsafe('PRAGMA foreign_keys = ON');
+  })();
+  return catalogReady;
+}
+
 if (process.env.NODE_ENV !== 'production') {
   global.__rasetuCatalogPrisma__ = prisma;
 }

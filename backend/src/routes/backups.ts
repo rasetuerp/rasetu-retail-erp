@@ -8,7 +8,7 @@ import { requireAuth, requireCompanyDb } from '../lib/auth-middleware.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import { recordMutation } from '../lib/mutation-log.js';
 import { HttpError } from '../lib/http-error.js';
-import { companyDbPath, companyBackupDir, resetCompanyClient, getCompanyClient } from '../db/company-registry.js';
+import { companyDbPath, companyBackupDir, resetCompanyClient, getReadyCompanyClient } from '../db/company-registry.js';
 
 // Round 7 — local database backup/restore, adapted from the manifest +
 // SHA-256 + mandatory-pre-restore-safety-backup pattern GoBilling's own
@@ -224,7 +224,7 @@ backupsRouter.post(
     // audit entry would land in a file we're about to discard, and the fact
     // a restore happened would be invisible in the database that's actually
     // live afterward.
-    const freshClient = getCompanyClient(companyId);
+    const freshClient = await getReadyCompanyClient(companyId);
     await recordMutation(freshClient, {
       userId: req.user?.id,
       entity: 'Company',

@@ -16,7 +16,16 @@ const dataDir = process.env.RASETU_DATA_DIR
   : path.resolve(BACKEND_ROOT, 'prisma', 'companies');
 const templatePath = path.resolve(BACKEND_ROOT, 'prisma', 'company', 'template.db');
 
-const registry = new Map<string, CompanyPrismaClient>();
+const COMPANY_CLIENT_IDLE_MS = 20 * 60 * 1000;
+const COMPANY_CLIENT_SWEEP_MS = 5 * 60 * 1000;
+
+type RegistryEntry = {
+  client: CompanyPrismaClient;
+  lastUsedAt: number;
+  ready: Promise<void>;
+};
+
+const registry = new Map<string, RegistryEntry>();
 
 // Round 9 — companies with storageType 'external' don't live under `dataDir`
 // at a formulaic path; their real location is resolved at runtime against
@@ -39,6 +48,14 @@ const externalDbPathCache = new Map<string, string>();
 // during Round 9's hardware test: a second disconnect after a reset lost the
 // friendly drive-disconnected messaging entirely without this.
 const knownExternalCompanyIds = new Set<string>();
+
+export function markKnownExternalCompany(companyId: string): void {
+  knownExternalCompanyIds.add(companyId);
+}
+
+export function isKnownExternalCompany(companyId: string): boolean {
+  return knownExternalCompanyIds.has(companyId);
+}
 
 /** Called by company-storage.ts once it has resolved an external company's current absolute path. */
 export function setResolvedExternalDbPath(companyId: string, absoluteDbPath: string): void {
@@ -65,13 +82,23 @@ export function companyBackupDir(companyId: string): string {
 
 function openClient(companyId: string): CompanyPrismaClient {
   const existing = registry.get(companyId);
-  if (existing) return existing;
+  if (existing) {
+    existing.lastUsedAt = Date.now();
+    return existing.client;
+  }
 
   const client = new CompanyPrismaClient({
     datasources: { db: { url: `file:${companyDbPath(companyId)}` } },
   });
-  registry.set(companyId, client);
+  registry.set(companyId, { client, lastUsedAt: Date.now(), ready: configureCompanyClient(client) });
   return client;
+}
+
+async function configureCompanyClient(client: CompanyPrismaClient): Promise<void> {
+  await client.$executeRawUnsafe('PRAGMA busy_timeout = 10000');
+  await client.$executeRawUnsafe('PRAGMA journal_mode = WAL');
+  await client.$executeRawUnsafe('PRAGMA synchronous = NORMAL');
+  await client.$executeRawUnsafe('PRAGMA foreign_keys = ON');
 }
 
 /** Opens an existing company's database. 404s if that company was never provisioned; 503s (DRIVE_DISCONNECTED) if it's a known-external company whose drive isn't reachable right now. */
@@ -85,6 +112,21 @@ export function getCompanyClient(companyId: string): CompanyPrismaClient {
     throw new HttpError(404, 'Company not found');
   }
   return openClient(companyId);
+}
+
+export async function getReadyCompanyClient(companyId: string): Promise<CompanyPrismaClient> {
+  const client = getCompanyClient(companyId);
+  const entry = registry.get(companyId);
+  if (entry) {
+    try {
+      await entry.ready;
+    } catch (err) {
+      registry.delete(companyId);
+      await entry.client.$disconnect().catch(() => undefined);
+      throw err;
+    }
+  }
+  return client;
 }
 
 /**
@@ -104,7 +146,9 @@ export function createCompanyDb(companyId: string, explicitDbPath?: string): Com
 
 /** Disconnects every lazily-opened company client — called on fatal shutdown. */
 export async function disconnectAllCompanyClients(): Promise<void> {
-  await Promise.all([...registry.values()].map((client) => client.$disconnect()));
+  const entries = [...registry.values()];
+  registry.clear();
+  await Promise.all(entries.map((entry) => entry.client.$disconnect()));
 }
 
 /**
@@ -118,7 +162,20 @@ export async function disconnectAllCompanyClients(): Promise<void> {
 export async function resetCompanyClient(companyId: string): Promise<void> {
   const existing = registry.get(companyId);
   if (existing) {
-    await existing.$disconnect();
     registry.delete(companyId);
+    await existing.client.$disconnect();
   }
+}
+
+export function startCompanyClientIdleSweeper(): NodeJS.Timeout {
+  return setInterval(() => {
+    const now = Date.now();
+    for (const [companyId, entry] of registry) {
+      if (now - entry.lastUsedAt < COMPANY_CLIENT_IDLE_MS) continue;
+      registry.delete(companyId);
+      entry.client.$disconnect().catch((err: unknown) => {
+        console.error(`[db] failed to disconnect idle company client ${companyId}:`, err);
+      });
+    }
+  }, COMPANY_CLIENT_SWEEP_MS);
 }
