@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   LayoutDashboard, Package, Receipt, ShoppingCart, Users, UserCog, BarChart3, Tag, LogOut, Settings, Menu, PackagePlus, FileText, LayoutTemplate,
-  Bell, ClipboardList, Printer, HelpCircle, ChevronDown, ShieldCheck, X,
+  Bell, ClipboardList, Printer, HelpCircle, ChevronDown, ShieldCheck, X, RefreshCw, Download,
 } from 'lucide-react';
 
 import { DashboardPage } from './components/pages/DashboardPage';
@@ -600,6 +600,8 @@ function AppShell() {
   const [notepadOpen, setNotepadOpen] = useState(false);
   const [printerSettingsOpen, setPrinterSettingsOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloaded' | 'error'>('idle');
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -628,6 +630,45 @@ function AppShell() {
     setDriveDisconnectedHandler((message) => setDriveDisconnectedMessage(message));
     return () => setDriveDisconnectedHandler(null);
   }, []);
+
+  useEffect(() => {
+    if (!window.rasetu) return;
+    return window.rasetu.onUpdateStatus((payload) => {
+      const status = (payload as { status?: string })?.status;
+      if (status === 'available') {
+        setUpdateStatus('available');
+        setUpdateMessage('Update found. Downloading...');
+      } else if (status === 'downloaded') {
+        setUpdateStatus('downloaded');
+        setUpdateMessage('Update ready to install.');
+      }
+    });
+  }, []);
+
+  async function checkForUpdates() {
+    if (!window.rasetu) {
+      setUpdateStatus('error');
+      setUpdateMessage('Updates are only available in the desktop app.');
+      return;
+    }
+    setUpdateStatus('checking');
+    setUpdateMessage('Checking for updates...');
+    try {
+      const result = (await window.rasetu.checkForUpdates()) as { updateInfo?: unknown } | null;
+      if (!result?.updateInfo) {
+        setUpdateStatus('idle');
+        setUpdateMessage('You are on the latest version.');
+      }
+    } catch (err) {
+      setUpdateStatus('error');
+      setUpdateMessage(err instanceof Error ? err.message : 'Update check failed.');
+    }
+  }
+
+  async function installUpdate() {
+    if (!window.rasetu) return;
+    await window.rasetu.installUpdate();
+  }
 
   // No session → Setup Wizard / Login gate (docs/SCOPE.md #1). No sidebar until
   // a company + admin account exist.
@@ -750,7 +791,24 @@ function AppShell() {
               >
                 <ShieldCheck size={15} /> Help & FAQ
               </button>
-              <div style={{ padding: '8px 12px', fontSize: 10.5, color: color.inkFaint, borderTop: `1px solid ${color.lineSoft}` }}>v0.1.0</div>
+              <button
+                onClick={() => void checkForUpdates()}
+                disabled={updateStatus === 'checking'}
+                style={{ ...profileMenuItem, borderTop: `1px solid ${color.lineSoft}`, opacity: updateStatus === 'checking' ? 0.65 : 1 }}
+              >
+                <RefreshCw size={15} /> {updateStatus === 'checking' ? 'Checking...' : 'Check for Updates'}
+              </button>
+              {updateStatus === 'downloaded' && (
+                <button
+                  onClick={() => void installUpdate()}
+                  style={{ ...profileMenuItem, color: color.money, borderTop: `1px solid ${color.lineSoft}` }}
+                >
+                  <Download size={15} /> Install Update
+                </button>
+              )}
+              <div style={{ padding: '8px 12px', fontSize: 10.5, color: updateStatus === 'error' ? color.alert : color.inkFaint, borderTop: `1px solid ${color.lineSoft}` }}>
+                v0.1.0{updateMessage ? ` - ${updateMessage}` : ''}
+              </div>
               <button
                 onClick={() => { setProfileMenuOpen(false); setSession(null); }}
                 style={{ ...profileMenuItem, color: color.alert, borderTop: `1px solid ${color.lineSoft}` }}
