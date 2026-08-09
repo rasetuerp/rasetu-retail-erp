@@ -546,7 +546,17 @@ function CategoriesCard() {
 // per-section text; this only stores which sections are on and in what
 // order — a text-only analog of a section catalog, since true drag
 // positioning doesn't apply to a monospace receipt).
-type ReceiptSettings = { exchangePolicyText: string; footerText: string; customMessageText: string; paymentInfoText: string; showSavingsLine: boolean; sections: ReceiptSectionConfig[]; columns: number };
+type ReceiptSettings = {
+  exchangePolicyText: string;
+  footerText: string;
+  customMessageText: string;
+  paymentInfoText: string;
+  showSavingsLine: boolean;
+  sections: ReceiptSectionConfig[];
+  columns: number;
+  marginLeftChars: number;
+  marginRightChars: number;
+};
 
 function ReceiptSettingsCard() {
   const { session } = useSession();
@@ -560,6 +570,8 @@ function ReceiptSettingsCard() {
   const paymentInfoRef = useRef<HTMLInputElement>(null);
   const savingsRef = useRef<HTMLInputElement>(null);
   const columnsRef = useRef<HTMLSelectElement>(null);
+  const marginLeftRef = useRef<HTMLInputElement>(null);
+  const marginRightRef = useRef<HTMLInputElement>(null);
 
   async function loadSettings() {
     if (!session) return;
@@ -607,6 +619,8 @@ function ReceiptSettingsCard() {
           paymentInfoText: paymentInfoRef.current?.value ?? '',
           showSavingsLine: savingsRef.current?.checked ?? true,
           columns: Number(columnsRef.current?.value ?? 32),
+          marginLeftChars: Number(marginLeftRef.current?.value ?? 0),
+          marginRightChars: Number(marginRightRef.current?.value ?? 0),
           sections,
         },
       });
@@ -660,9 +674,19 @@ function ReceiptSettingsCard() {
           Thermal printer roll width
           <select ref={columnsRef} key={settings.columns} defaultValue={settings.columns} style={inputStyle}>
             <option value={32}>58mm roll (32 columns) - default</option>
-            <option value={48}>80mm roll (48 columns)</option>
+            <option value={48}>80mm / 3 inch roll (48 columns)</option>
           </select>
         </label>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <label style={labelStyle}>
+            Left margin (chars)
+            <input ref={marginLeftRef} key={`left-${settings.marginLeftChars}`} type="number" min={0} max={12} defaultValue={settings.marginLeftChars ?? 0} style={{ ...inputStyle, width: 120 }} />
+          </label>
+          <label style={labelStyle}>
+            Right margin (chars)
+            <input ref={marginRightRef} key={`right-${settings.marginRightChars}`} type="number" min={0} max={12} defaultValue={settings.marginRightChars ?? 0} style={{ ...inputStyle, width: 120 }} />
+          </label>
+        </div>
 
         <div style={{ borderTop: `1px solid ${color.lineSoft}`, margin: '4px 0' }} />
         <div style={{ fontSize: 12.5, fontWeight: 600, color: color.ink }}>Receipt sections</div>

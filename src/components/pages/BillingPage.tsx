@@ -181,7 +181,17 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
   const cancelReasonRef = useRef<HTMLInputElement>(null);
   const [printableInvoice, setPrintableInvoice] = useState<PrintableInvoice | null>(null);
   const [thermalLayout, setThermalLayout] = useState<ThermalLayout>('receipt');
-  const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>({ exchangePolicyText: '', footerText: '', customMessageText: '', paymentInfoText: '', showSavingsLine: true, sections: DEFAULT_RECEIPT_SECTIONS, columns: 32 });
+  const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>({
+    exchangePolicyText: '',
+    footerText: '',
+    customMessageText: '',
+    paymentInfoText: '',
+    showSavingsLine: true,
+    sections: DEFAULT_RECEIPT_SECTIONS,
+    columns: 32,
+    marginLeftChars: 0,
+    marginRightChars: 0,
+  });
   const [a4Layout, setA4Layout] = useState<A4Layout>('a4');
   const [printStatus, setPrintStatus] = useState<string | null>(null);
   // Round 13 — preview the actual printable output before committing to

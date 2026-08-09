@@ -23,7 +23,17 @@ type InvoiceSummary = {
 type PaymentModeEntry = { name: string; isActive: boolean };
 
 const { color } = theme;
-const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = { exchangePolicyText: '', footerText: '', customMessageText: '', paymentInfoText: '', showSavingsLine: true, sections: DEFAULT_RECEIPT_SECTIONS, columns: 32 };
+const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
+  exchangePolicyText: '',
+  footerText: '',
+  customMessageText: '',
+  paymentInfoText: '',
+  showSavingsLine: true,
+  sections: DEFAULT_RECEIPT_SECTIONS,
+  columns: 32,
+  marginLeftChars: 0,
+  marginRightChars: 0,
+};
 const STATUS_TABS: Array<{ value: InvoiceStatus | 'ALL'; label: string }> = [
   { value: 'POSTED', label: 'Posted' },
   { value: 'ALL', label: 'All' },

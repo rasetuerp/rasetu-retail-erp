@@ -91,7 +91,17 @@ export const DEFAULT_RECEIPT_SECTIONS: ReceiptSectionConfig[] = (Object.keys(REC
 
 // Round 6 — shop-configurable text shown on the thermal receipt footer;
 // mirrors backend/src/routes/invoices.ts's receiptSettingsSchema defaults.
-export type ReceiptSettings = { exchangePolicyText: string; footerText: string; customMessageText: string; paymentInfoText: string; showSavingsLine: boolean; sections: ReceiptSectionConfig[]; columns: number };
+export type ReceiptSettings = {
+  exchangePolicyText: string;
+  footerText: string;
+  customMessageText: string;
+  paymentInfoText: string;
+  showSavingsLine: boolean;
+  sections: ReceiptSectionConfig[];
+  columns: number;
+  marginLeftChars: number;
+  marginRightChars: number;
+};
 const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
   exchangePolicyText: 'Exchange within 7 days with bill. No exchange on sale items and altered garments.',
   footerText: 'Thank you! Visit again',
@@ -107,6 +117,8 @@ const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
   // Round 17 — physical roll width in characters (58mm ≈ 32 cols, 80mm ≈ 48
   // cols at standard thermal font). Drives every thermal layout below.
   columns: 32,
+  marginLeftChars: 0,
+  marginRightChars: 0,
 };
 
 function money(v: string | number): string {
@@ -450,8 +462,40 @@ const THERMAL_BUILDERS: Record<ThermalLayout, (inv: PrintableInvoice, settings: 
   receipt: thermalReceipt,
 };
 
+function receiptContentColumns(settings: ReceiptSettings): number {
+  const left = Math.max(0, Math.floor(settings.marginLeftChars ?? 0));
+  const right = Math.max(0, Math.floor(settings.marginRightChars ?? 0));
+  return Math.max(20, settings.columns - left - right);
+}
+
+function wrapReceiptLine(line: string, width: number): string[] {
+  if (line.length <= width) return [line];
+  const wrapped: string[] = [];
+  let rest = line;
+  while (rest.length > width) {
+    let cut = rest.lastIndexOf(' ', width);
+    if (cut < Math.floor(width * 0.55)) cut = width;
+    wrapped.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut).trimStart();
+  }
+  wrapped.push(rest);
+  return wrapped;
+}
+
+function applyReceiptPaper(raw: string, settings: ReceiptSettings): string {
+  const left = Math.max(0, Math.floor(settings.marginLeftChars ?? 0));
+  const prefix = ' '.repeat(left);
+  const width = receiptContentColumns(settings);
+  return raw
+    .split('\n')
+    .flatMap((line) => (line ? wrapReceiptLine(line, width) : ['']))
+    .map((line) => (line ? prefix + line : ''))
+    .join('\n');
+}
+
 export function buildThermalReceipt(invoice: PrintableInvoice, layout: ThermalLayout, settings: ReceiptSettings = DEFAULT_RECEIPT_SETTINGS): string {
-  return THERMAL_BUILDERS[layout](invoice, settings);
+  const effectiveSettings = { ...settings, columns: receiptContentColumns(settings) };
+  return applyReceiptPaper(THERMAL_BUILDERS[layout](invoice, effectiveSettings), settings);
 }
 
 /** Guards the Electron-only bridge (electron/preload.ts) the same way LabelsPage does. */
