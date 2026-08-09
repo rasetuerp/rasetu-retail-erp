@@ -14,13 +14,22 @@ function runPrismaDbPush(schemaPath, env) {
   });
 }
 
+function ensureSeedDb(dbPath, schemaPath, env) {
+  if (fs.existsSync(dbPath)) {
+    console.log(`Seed database ready: ${path.relative(backendRoot, dbPath)}`);
+    return;
+  }
+
+  runPrismaDbPush(schemaPath, env);
+}
+
 fs.mkdirSync(path.join(backendRoot, 'prisma', 'catalog'), { recursive: true });
 fs.mkdirSync(path.join(backendRoot, 'prisma', 'company'), { recursive: true });
 
-runPrismaDbPush('prisma/catalog/schema.prisma', {
+ensureSeedDb(path.join(backendRoot, 'prisma', 'catalog', 'catalog.db'), 'prisma/catalog/schema.prisma', {
   CATALOG_DATABASE_URL: 'file:./catalog.db',
 });
 
-runPrismaDbPush('prisma/company/schema.prisma', {
+ensureSeedDb(path.join(backendRoot, 'prisma', 'company', 'template.db'), 'prisma/company/schema.prisma', {
   COMPANY_DATABASE_URL: 'file:./template.db',
 });
