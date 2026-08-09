@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function runPrismaDbPush(schemaPath, env) {
-  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  execFileSync(npx, ['prisma', 'db', 'push', '--schema', schemaPath, '--skip-generate'], {
+  const prismaCli = path.join(backendRoot, 'node_modules', 'prisma', 'build', 'index.js');
+  execFileSync(process.execPath, [prismaCli, 'db', 'push', '--schema', schemaPath, '--skip-generate'], {
     cwd: backendRoot,
     env: { ...process.env, ...env },
     stdio: 'inherit',
