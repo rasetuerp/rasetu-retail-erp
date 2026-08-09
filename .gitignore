@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+
+# Build outputs
+dist/
+dist-electron/
+backend/dist/
+release-customer/
+*.tsbuildinfo
+
+# Generated Prisma clients and native query engines
+backend/src/generated/
+backend/dist/generated/
+
+# Local databases, backups, and customer data
+*.db
+*.db.bak
+*.db-*
+*.db-journal
+*.sqlite
+*.sqlite3
+backend/prisma/companies/
+backend/prisma/backups/
+backups/
+uploads/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+supabase/.temp/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs and temp files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+tmp/
+temp/
+.cache/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/
+
+# Large generated brand/output artifacts
+Rasetu Logo/
+Rasetu Logo/outputs/

@@ -1,0 +1,38 @@
+{
+  "name": "rasetu-retail-erp-backend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json && node scripts/copy-generated.mjs",
+    "start": "node dist/index.js",
+    "prisma:generate": "prisma generate --schema=prisma/catalog/schema.prisma && prisma generate --schema=prisma/company/schema.prisma",
+    "prisma:migrate:catalog": "prisma migrate dev --schema=prisma/catalog/schema.prisma",
+    "prisma:migrate:company": "prisma migrate dev --schema=prisma/company/schema.prisma",
+    "prisma:studio:catalog": "prisma studio --schema=prisma/catalog/schema.prisma",
+    "db:backup": "node scripts/backup-sqlite.mjs"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.8.2",
+    "@supabase/supabase-js": "^2.110.8",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "drivelist": "^12.0.2",
+    "express": "^5.1.0",
+    "jose": "^6.2.2",
+    "xlsx": "^0.18.5",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.18",
+    "@types/drivelist": "^6.4.4",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.0",
+    "prisma": "^6.8.2",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}

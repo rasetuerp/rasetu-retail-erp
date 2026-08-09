@@ -1,0 +1,53 @@
+productName: RaSetu Retail ERP
+appId: com.rasetu.retailerp
+publish:
+  provider: github
+  owner: rasetuerp
+  repo: rasetu-retail-erp-updates
+  releaseType: release
+directories:
+  buildResources: assets
+  output: release-customer
+files:
+  - assets/**/*
+  - config/profiles/**/*
+  - dist/**/*
+  - dist-electron/**/*
+  - backend/dist/**/*
+  - backend/node_modules/**/*
+  - backend/package.json
+  - backend/prisma/**/*
+  - package.json
+  - "!**/.env"
+  - "!**/.env.*"
+  - "!**/*.map"
+  - "!**/*.ts"
+  - "!**/*.tsx"
+  - "!**/*.md"
+  - "!backend/src/**/*"
+  - "!backend/prisma/*.db"
+  - "!backend/prisma/*.db-journal"
+  - "!src/**/*"
+  - "!electron/**/*"
+  - "!scripts/**/*"
+  - "!docs/**/*"
+asarUnpack:
+  - assets/**/*
+  - dist/**/*
+  - backend/**/*
+win:
+  icon: assets/icon.ico
+  target:
+    - nsis
+  artifactName: RaSetu-ERP-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  installerIcon: assets/icon.ico
+  installerHeaderIcon: assets/icon.ico
+  uninstallerIcon: assets/icon.ico
+  runAfterFinish: true

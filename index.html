@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RaSetu Retail ERP</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <style>
+      /* Foundational reset, not component styling — RULES.md #1's "inline
+         style objects only" is about page CSS, not this. Without it, every
+         fixed-width input with padding renders wider than declared (padding
+         adds on top of width instead of eating into it) — the exact cause of
+         the password-field overflow. */
+      *, *::before, *::after { box-sizing: border-box; }
+    </style>
+  </head>
+  <body style="margin:0">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

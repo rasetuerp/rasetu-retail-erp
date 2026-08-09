@@ -1,0 +1,69 @@
+// Round 4 — the "catalog" database: the one thing that must be queryable
+// before you know which per-company database to open (the company picker,
+// POST /companies onboarding, the Super Admin cross-company support flow).
+// Everything else lives in a per-company database — see prisma/company/schema.prisma.
+// See docs/plan Round 4 design decision #3 before touching this file.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../src/generated/catalog-client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("CATALOG_DATABASE_URL")
+}
+
+model Company {
+  id                String            @id @default(cuid())
+  name              String
+  gstin             String?
+  address           String?
+  phone             String?
+  email             String?
+  // Round 12 — Shop Profile expansion: an alternate contact number plus
+  // online-presence links, all optional, shown on invoices/receipts is a
+  // future concern — for now these just live on the Company record and are
+  // editable from Settings → Shop Profile.
+  alternatePhone    String?
+  website           String?
+  facebookUrl       String?
+  instagramUrl      String?
+  whatsappNumber    String?
+  logoPath          String?
+  fyStartMonth      Int               @default(4) // April
+  invoicePrefix     String            @default("INV")
+  // Round 11 — short prefix used in auto-generated SKUs (ShopCode-CategoryCode-
+  // Year-Serial, e.g. "FTS-SHI-26-0001". Null until the shop sets/confirms one
+  // in Settings; both Settings and the SKU-generation endpoint independently
+  // fall back to abbreviateToCode(name) so the feature works before that.
+  shopCode          String?
+  verticalProfileId String?
+  verticalProfile   VerticalProfile?  @relation(fields: [verticalProfileId], references: [id])
+  // Round 9 — multi-company portable storage (docs/ARCHITECTURE.md "Multi-company
+  // storage"). Fixed at creation, not relocatable this round (docs/PENDING.md).
+  // "internal" (default): unchanged behavior, path is the fixed
+  // <userData>/companies/<id>.db formula in company-registry.ts. "external":
+  // resolved at runtime against whichever drive currently reports `volumeId`
+  // (backend/src/lib/drives.ts) — never trust a stored absolute path, drive
+  // letters are not stable.
+  storageType       String            @default("internal") // "internal" | "external"
+  dbDir             String?           // external only: the fixed subpath under the volume root, e.g. "RaSetuData/companies/<id>" — relative, not absolute
+  volumeId          String?           // external only: PowerShell Get-Volume's stable UniqueId for the drive this company lives on
+  volumeLabel       String?           // external only: friendly display name, e.g. "SANDISK 32GB" — display only
+  volumeMountHint   String?           // external only: last-seen drive letter, e.g. "E:\\" — display only ("please plug in the drive last seen at..."), never used for path resolution
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@unique([volumeId, dbDir])
+}
+
+model VerticalProfile {
+  id         String    @id @default(cuid())
+  key        String    @unique // "cloth", "hardware", "electronics", "steel"
+  name       String
+  configJson String    // full JSON blob, see config/profiles/profile-<key>.json
+  createdAt  DateTime  @default(now())
+
+  companies  Company[]
+}

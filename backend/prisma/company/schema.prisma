@@ -1,0 +1,441 @@
+// Round 4 — the per-company database. One physical SQLite file per company;
+// `companyId` columns are kept as plain tags (not Prisma relations — Company
+// itself lives in the separate catalog database, see prisma/catalog/schema.prisma)
+// for the sync-push payload and to keep every route's existing shape intact.
+// See docs/plan Round 4 design decision #3 before touching this file.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../src/generated/company-client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("COMPANY_DATABASE_URL")
+}
+
+enum PartyType {
+  CUSTOMER
+  SUPPLIER
+}
+
+enum StockMovementType {
+  PURCHASE
+  SALE
+  ADJUST
+  DAMAGE
+  OPENING
+  // Round 10 — genuinely different mechanics from ADJUST/DAMAGE (direction +
+  // linked document), so these get real enum values. "Scrap" deliberately
+  // does NOT get its own value — it's DAMAGE with a free-text reason, same
+  // mechanics, no need for a parallel type (see docs/SCHEMA.md Round 10 entry).
+  SALES_RETURN
+  PURCHASE_RETURN
+}
+
+enum InvoiceStatus {
+  DRAFT
+  HELD
+  // Round 5 follow-up — a non-tax quotation handed to the customer before
+  // they commit: gets its own sequential EST/<fy>/<seq> number (never an
+  // Invoice.invoicePrefix number, never GST-filed), never touches stock or
+  // the party's ledger. Reuses the Invoice/InvoiceItem model rather than a
+  // parallel Estimate model since it needs the identical item lines + GST
+  // breakdown shape. Can later be converted into a real POSTED invoice via
+  // the existing /post endpoint (same as DRAFT/HELD → POSTED already works).
+  ESTIMATE
+  POSTED
+  CANCELLED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  companyId    String
+  name         String
+  username     String   @unique
+  passwordHash String
+  role         String   @default("STAFF") // ADMIN / STAFF — SUPER_ADMIN (Round 4: vendor
+  // support role, lives only in Supabase Auth, never a local row) is a valid
+  // JWT/session role but is never stored here.
+  // Round 3: device-bound quick-login PIN, set via self-service or an admin
+  // reset — null means no PIN configured yet, falls back to password login.
+  pinHash      String?
+  // Round 3: nullable JSON array of allowed Tab strings (App.tsx's NAV);
+  // null = full access (default for ADMIN/SUPER_ADMIN, and unchanged
+  // behavior for every STAFF row that existed before this column).
+  permissions  String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Party {
+  id          String     @id @default(cuid())
+  companyId   String
+  type        PartyType
+  name        String
+  gstin       String?
+  phone       String?
+  email       String?
+  address     String?
+  // Round 5 — deliberately NOT unique: one phone number is expected to be
+  // shared by multiple Party rows (family members under one household
+  // number), used for marketing. "Family" = every Party with this phone.
+  dob         DateTime?
+  anniversary DateTime?
+  notes       String?    // free-text marketing notes (preferences, sizes, etc.)
+  balance     Decimal    @default(0) // decimal(12,2)
+  // Round 10 — advisory only: Billing shows a non-blocking warning when a
+  // cart would push this party's balance past the limit, never blocks
+  // posting (docs/SCHEMA.md Round 10 entry). 0/null = no limit.
+  creditLimit Decimal?   @default(0)
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  invoices    Invoice[]
+  purchases   Purchase[]
+  payments    Payment[]
+  ledgerEntries LedgerEntry[]
+  creditNotes CreditNote[]
+  debitNotes  DebitNote[]
+
+  @@index([companyId, type])
+}
+
+model Item {
+  id            String   @id @default(cuid())
+  companyId     String
+  sku           String
+  barcode       String?  @unique
+  hsn           String?
+  category      String?
+  brand         String?
+  size          String?
+  color         String?
+  unit          String   @default("PCS") // PCS, MTR, SET, KG, BOX — profile-controlled
+  purchaseRate  Decimal  @default(0)
+  mrp           Decimal  @default(0)
+  sellingRate   Decimal  @default(0)
+  gstRate       Decimal  @default(0)
+  gstInclusive  Boolean  @default(true) // cloth default: inclusive
+  stockQty      Decimal  @default(0) // decimal(10,3)
+  minStock      Decimal  @default(0)
+  isActive      Boolean  @default(true)
+  // Round 10 — legal-metrology label fields (docs/SCHEMA.md Round 10 entry).
+  // All optional: only shops that print full product labels (vs. just a
+  // barcode tag) need these, so they stay out of the primary quick-entry
+  // flow and live in a collapsible "Label / legal details" section instead.
+  commodity     String?  // generic legal name of the goods, e.g. "Shirt" — distinct from `category`, which is the shop's own grouping
+  itemType      String?  // sub-classification, e.g. "Casual"
+  brandCode     String?  // shop's internal short brand code — distinct from the free-text `brand`
+  styleCode     String?  // internal style/design code
+  mfgDate       DateTime? // manufacture date; labels print it as "MMMM yyyy" (see src/lib/labelPrint.ts)
+  netQtyLabel   String?  // free-text net-quantity declaration for the label, e.g. "1 N", "500 g" — kept as free text rather than a unit-conversion system since legal metrology descriptors don't map cleanly onto the internal `unit` field
+  // Round 10 — values for shop-added custom item fields (Settings → Item
+  // Fields). The field *definitions* (key/label/required) live in a
+  // per-company Setting ('item-fields'), not the schema — this column just
+  // holds whatever values a shop's own custom fields have per item, keyed by
+  // the same `key` the definition uses. category/brand/size/color stay real
+  // columns above; this is only for fields a shop adds themselves.
+  customFields  Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  stockMovements StockMovement[]
+  invoiceItems   InvoiceItem[]
+  purchaseItems  PurchaseItem[]
+  creditNoteItems CreditNoteItem[]
+  debitNoteItems  DebitNoteItem[]
+
+  @@unique([companyId, sku])
+  @@index([companyId, category])
+}
+
+model StockMovement {
+  id        String            @id @default(cuid())
+  itemId    String
+  item      Item              @relation(fields: [itemId], references: [id])
+  type      StockMovementType
+  qty       Decimal // decimal(10,3), signed: +in / -out
+  refType   String?           // "Invoice" | "Purchase" | "Adjustment"
+  refId     String?
+  reason    String?           // mandatory for DAMAGE/ADJUST
+  createdAt DateTime          @default(now())
+
+  @@index([itemId, createdAt])
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  companyId     String
+  number        String        // FY-scoped, e.g. INV/2026-27/0001 — sequential, gap-free
+  fyLabel       String        // "2026-27"
+  date          DateTime      @default(now())
+  partyId       String?
+  party         Party?        @relation(fields: [partyId], references: [id])
+  status        InvoiceStatus @default(DRAFT)
+  subtotal      Decimal       @default(0)
+  discountPct   Decimal       @default(0)
+  discountAmt   Decimal       @default(0)
+  roundOff      Decimal       @default(0)
+  cgst          Decimal       @default(0)
+  sgst          Decimal       @default(0)
+  igst          Decimal       @default(0)
+  total         Decimal       @default(0)
+  oldBalance    Decimal       @default(0)
+  newBalance    Decimal       @default(0)
+  dueDate       DateTime?
+  loyaltyEarned Decimal       @default(0)
+  cancelledAt   DateTime?
+  cancelReason  String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  items         InvoiceItem[]
+  payments      Payment[]
+  creditNotes   CreditNote[]
+  ledgerEntries LedgerEntry[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status, date])
+}
+
+model InvoiceItem {
+  id         String  @id @default(cuid())
+  invoiceId  String
+  invoice    Invoice @relation(fields: [invoiceId], references: [id])
+  itemId     String
+  item       Item    @relation(fields: [itemId], references: [id])
+  qty        Decimal // decimal(10,3)
+  rate       Decimal
+  gstRate    Decimal
+  gstInclusive Boolean
+  discountPct  Decimal @default(0)
+  // Round 5 — set only when an ADMIN/SUPER_ADMIN overrode the auto-computed
+  // slab GST% for this line; null means gstRate was computed normally via
+  // clothSlabGstRate(mrp). Kept for GST-filing audit purposes.
+  gstOverrideReason String?
+  amount     Decimal
+}
+
+model Payment {
+  id        String      @id @default(cuid())
+  companyId String
+  // Round 5 — was a fixed PaymentMode enum; payment modes are now an
+  // admin-editable list stored in Setting (key 'payment-modes'), validated
+  // at the Zod/route layer instead of the database.
+  mode      String
+  amount    Decimal
+  // Round 10 — reporting/labeling only ("Receipts" vs "Payment Vouchers" in
+  // the UI); auto-set from the party's type, never changes the existing
+  // balance/ledger math below (docs/SCHEMA.md Round 10 entry).
+  direction String      @default("IN") // "IN" | "OUT"
+  refNumber String?
+  invoiceId String?
+  invoice   Invoice?    @relation(fields: [invoiceId], references: [id])
+  partyId   String?
+  party     Party?      @relation(fields: [partyId], references: [id])
+  date      DateTime    @default(now())
+  createdAt DateTime    @default(now())
+
+  @@index([companyId, date])
+}
+
+model Purchase {
+  id          String       @id @default(cuid())
+  companyId   String
+  billNumber  String
+  billDate    DateTime     @default(now())
+  partyId     String
+  party       Party        @relation(fields: [partyId], references: [id])
+  subtotal    Decimal      @default(0)
+  cgst        Decimal      @default(0)
+  sgst        Decimal      @default(0)
+  igst        Decimal      @default(0)
+  total       Decimal      @default(0)
+  monthLocked Boolean      @default(false)
+  cancelledAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  items       PurchaseItem[]
+  debitNotes  DebitNote[]
+
+  @@index([companyId, billDate])
+}
+
+model PurchaseItem {
+  id         String   @id @default(cuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id])
+  itemId     String
+  item       Item     @relation(fields: [itemId], references: [id])
+  qty        Decimal
+  rate       Decimal
+  gstRate    Decimal
+  amount     Decimal
+}
+
+model CreditNote {
+  id         String   @id @default(cuid())
+  companyId  String
+  number     String
+  date       DateTime @default(now())
+  invoiceId  String
+  invoice    Invoice  @relation(fields: [invoiceId], references: [id])
+  partyId    String
+  party      Party    @relation(fields: [partyId], references: [id])
+  amount     Decimal
+  reason     String
+  createdAt  DateTime @default(now())
+
+  // Round 15 — running total of how much of this return has actually been
+  // paid back in cash (vs. left as store credit against the party's
+  // balance, which is what happens unconditionally below regardless of
+  // this field). See POST /:noteId/refund in credit-notes.ts — capped so a
+  // return can never be refunded for more than it's worth.
+  refundedAmount Decimal @default(0)
+
+  // Round 10 — line-item detail for a Sales Return (docs/SCHEMA.md Round 10
+  // entry). Previously CreditNote had only a lump `amount` with no record of
+  // which items/quantities came back, so it could never actually reverse
+  // stock — this is what makes returns functional instead of just a note.
+  items      CreditNoteItem[]
+
+  @@unique([companyId, number])
+}
+
+// Round 10 — mirrors InvoiceItem's shape deliberately (same pattern the
+// codebase already uses for Invoice/InvoiceItem and Purchase/PurchaseItem).
+model CreditNoteItem {
+  id           String     @id @default(cuid())
+  creditNoteId String
+  creditNote   CreditNote @relation(fields: [creditNoteId], references: [id])
+  itemId       String
+  item         Item       @relation(fields: [itemId], references: [id])
+  qty          Decimal
+  rate         Decimal
+  amount       Decimal
+}
+
+// Round 10 — Purchase Return, structurally parallel to CreditNote/
+// CreditNoteItem (and to Purchase/PurchaseItem) rather than a new pattern
+// (docs/SCHEMA.md Round 10 entry). Genuinely new — no purchase-return
+// concept existed before this.
+model DebitNote {
+  id         String   @id @default(cuid())
+  companyId  String
+  number     String   // DN/<year>/<seq>
+  date       DateTime @default(now())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id])
+  partyId    String
+  party      Party    @relation(fields: [partyId], references: [id])
+  amount     Decimal
+  reason     String
+  createdAt  DateTime @default(now())
+
+  items      DebitNoteItem[]
+
+  @@unique([companyId, number])
+}
+
+model DebitNoteItem {
+  id          String    @id @default(cuid())
+  debitNoteId String
+  debitNote   DebitNote @relation(fields: [debitNoteId], references: [id])
+  itemId      String
+  item        Item      @relation(fields: [itemId], references: [id])
+  qty         Decimal
+  rate        Decimal
+  amount      Decimal
+}
+
+model LedgerEntry {
+  id        String   @id @default(cuid())
+  partyId   String
+  party     Party    @relation(fields: [partyId], references: [id])
+  debit     Decimal  @default(0)
+  credit    Decimal  @default(0)
+  balance   Decimal
+  refType   String   // "Invoice" | "Payment" | "CreditNote" | "OpeningBalance"
+  refId     String?
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id])
+  date      DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([partyId, date])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  entity    String   // "Invoice", "Item", "Party", ...
+  entityId  String
+  action    String   // "CREATE" | "UPDATE" | "CANCEL" | "DELETE" | "SUPER_ADMIN_ACCESS"
+  oldValue  String?  // JSON snapshot
+  newValue  String?  // JSON snapshot
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+}
+
+model SyncQueue {
+  id         String   @id @default(cuid())
+  tableName  String
+  rowId      String
+  action     String   // "CREATE" | "UPDATE" | "DELETE"
+  payload    String   // JSON snapshot of the row
+  synced     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  syncedAt   DateTime?
+
+  @@index([synced])
+}
+
+model Setting {
+  id        String  @id @default(cuid())
+  companyId String
+  key       String
+  value     String  // JSON-encoded
+
+  @@unique([companyId, key])
+}
+
+// Round 11 — backs auto-generated SKUs (ShopCode-CategoryCode-Year-Serial).
+// A real table rather than a Setting-JSON blob because bulk item creation
+// must hand out several sequential serials atomically in one transaction,
+// which a read-modify-write JSON blob can't guarantee safely. The category
+// list itself (name+code) still lives in a Setting ('item-categories') —
+// only the numeric counters need row-level atomicity.
+model SkuCounter {
+  id           String @id @default(cuid())
+  companyId    String
+  categoryCode String
+  year         Int
+  lastSerial   Int    @default(0)
+
+  @@unique([companyId, categoryCode, year])
+}
+
+// Round 7 — replaces the old 3-name label-settings Setting key. Each row is a
+// full, free-drag label design (arbitrary mm size + a positioned element
+// list) rather than a name with no layout data behind it — see
+// docs/SCHEMA.md's Round 7 entry for why this needed a real column set
+// instead of another Setting-JSON blob.
+model LabelTemplate {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  isDefault   Boolean  @default(false)
+  widthMm     Decimal
+  heightMm    Decimal
+  elements    String   // JSON-encoded LabelElement[] — see src/components/pages/LabelDesignerPage.tsx
+  printConfig String   // JSON-encoded { darkness, gapMm, xOffsetMm, yOffsetMm, dpi }
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, name])
+}

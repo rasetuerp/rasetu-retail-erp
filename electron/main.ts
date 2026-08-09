@@ -1,0 +1,600 @@
+import { app, BrowserWindow, ipcMain, Menu, dialog } from 'electron';
+import electronUpdater from 'electron-updater';
+const { autoUpdater } = electronUpdater;
+import nodeMachineId from 'node-machine-id';
+const { machineIdSync } = nodeMachineId;
+import path from 'node:path';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+import zlib from 'node:zlib';
+import { spawn, type ChildProcess } from 'node:child_process';
+
+import { getPrinterManager, initializePrinterManager } from './printer-api.js';
+import { verifyValidationToken } from './license-verify.js';
+import { readPrinterConfig, writePrinterConfig, type PrinterRole, type PrinterConfig } from './printer-config.js';
+
+// v1-scoped main process. Covers: window lifecycle, backend process, printer IPC,
+// license IPC, auto-update, and (Round 7) local/extra-folder/R2 database backups.
+
+const isDev = !app.isPackaged;
+let mainWindow: BrowserWindow | null = null;
+let backendProcess: ChildProcess | null = null;
+
+function startBackend() {
+  const backendEntry = isDev
+    ? path.join(process.cwd(), 'backend', 'dist', 'index.js')
+    : path.join(process.resourcesPath, 'backend', 'dist', 'index.js');
+
+  backendProcess = spawn(process.execPath, [backendEntry], {
+    // Round 4: one catalog DB + one file per company, rooted under the OS
+    // per-user data directory rather than inside the app bundle (see
+    // backend/src/db/company-registry.ts).
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', RASETU_DATA_DIR: app.getPath('userData') },
+    stdio: 'inherit',
+  });
+
+  backendProcess.on('exit', (code) => {
+    mainWindow?.webContents.send('rt:backend-status', { running: false, code });
+  });
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    // Packaged builds get their icon from electron-builder's win.icon
+    // (embedded in the .exe); dev mode needs it set explicitly here or the
+    // unpackaged window shows Electron's default icon instead of RaSetu's.
+    ...(isDev ? { icon: path.join(process.cwd(), 'assets', 'icon.ico') } : {}),
+    webPreferences: {
+      preload: path.join(app.getAppPath(), 'dist-electron', 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  Menu.setApplicationMenu(null);
+
+  const frontendUrl = isDev
+    ? 'http://localhost:5183'
+    : `file://${path.join(app.getAppPath(), 'dist', 'index.html')}`;
+  void mainWindow.loadURL(frontendUrl);
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
+
+app.whenReady().then(() => {
+  startBackend();
+  initializePrinterManager();
+  createWindow();
+
+  if (!isDev) {
+    void autoUpdater.checkForUpdatesAndNotify();
+  }
+
+  // Round 7 — background backup cycle (local + extra folders + opt-in R2)
+  // and license re-validation, on GoBilling's own proven cadence: first run
+  // 5 minutes after launch (so a quick in-and-out session doesn't churn disk
+  // for nothing), then every 6h (backups) / 4h (license). Each tick is
+  // independent and swallows its own errors — see runScheduledBackupCycle's
+  // and runLicenseRevalidation's own try/catch.
+  setTimeout(() => {
+    void runScheduledBackupCycle();
+    void runLicenseRevalidation();
+  }, BACKUP_STARTUP_DELAY_MS);
+  setInterval(() => void runScheduledBackupCycle(), BACKUP_INTERVAL_MS);
+  setInterval(() => void runLicenseRevalidation(), LICENSE_CHECK_INTERVAL_MS);
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  backendProcess?.kill();
+  if (process.platform !== 'darwin') app.quit();
+});
+
+// ---------- window controls ----------
+ipcMain.handle('rt:window-minimize', () => mainWindow?.minimize());
+ipcMain.handle('rt:window-toggle-maximize', () =>
+  mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize()
+);
+ipcMain.handle('rt:window-close', () => mainWindow?.close());
+ipcMain.handle('rt:window-state', () => ({
+  isMaximized: mainWindow?.isMaximized() ?? false,
+}));
+
+// ---------- app / backend / update status ----------
+ipcMain.handle('rt:ping', () => 'pong');
+ipcMain.handle('rt:app-info', () => ({
+  name: app.getName(),
+  version: app.getVersion(),
+}));
+ipcMain.handle('rt:backend-status', () => ({ running: backendProcess !== null && !backendProcess.killed }));
+ipcMain.handle('rt:backend-restart', () => {
+  backendProcess?.kill();
+  startBackend();
+});
+ipcMain.handle('rt:update-check', () => autoUpdater.checkForUpdates());
+ipcMain.handle('rt:update-install', () => autoUpdater.quitAndInstall());
+ipcMain.handle('rt:get-machine-id', () => machineIdSync(true));
+
+// Must be kept in sync with src/lib/license.ts's identical constants — main.ts
+// needs its own copy for the background license-revalidation and R2-backup
+// calls below (Node/Electron main process, can't import renderer-side modules).
+const LICENSE_FUNCTIONS_URL = 'https://doopelkfucwiogrylysj.supabase.co/functions/v1';
+const LICENSE_ANON_KEY = 'sb_publishable_Fp4R_QUz_d_Hzs0pBA2eKw_986nPQzz';
+
+// ---------- licensing (docs/COMMERCIAL.md, Round 4) ----------
+// One license per installed copy (machine), not per company — gates the
+// whole app before even the company picker. Stored as a local JSON
+// snapshot (not a DB row): license state is machine-level, independent of
+// which/how-many companies exist. See docs/plan Round 4 design decision #2.
+type LicenseSnapshot = {
+  licenseKey: string;
+  machineId: string;
+  validationToken: string;
+  lastValidAt: string;
+};
+
+function licenseSnapshotPath() {
+  return path.join(app.getPath('userData'), 'license-snapshot.json');
+}
+
+function readLicenseSnapshot(): LicenseSnapshot | null {
+  try {
+    return JSON.parse(fs.readFileSync(licenseSnapshotPath(), 'utf8')) as LicenseSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+ipcMain.handle('rt:license-verify-token', (_event, token: string) => verifyValidationToken(token));
+
+ipcMain.handle('rt:license-save-snapshot', (_event, snapshot: LicenseSnapshot) => {
+  fs.mkdirSync(path.dirname(licenseSnapshotPath()), { recursive: true });
+  fs.writeFileSync(licenseSnapshotPath(), JSON.stringify(snapshot, null, 2));
+  return true;
+});
+
+ipcMain.handle('rt:license-clear-snapshot', () => {
+  try {
+    fs.unlinkSync(licenseSnapshotPath());
+  } catch {
+    // already gone — fine
+  }
+  return true;
+});
+
+ipcMain.handle('rt:license-get-snapshot', () => readLicenseSnapshot());
+
+// Offline-first startup check: verify the cached token's own signature +
+// expiry (no network round trip) — this IS the offline grace period, sized
+// by the Edge Function's token TTL (30 days), not a separate mechanism.
+ipcMain.handle('rt:license-startup-status', () => {
+  const snapshot = readLicenseSnapshot();
+  if (!snapshot) return { hasValidLicense: false };
+
+  const verified = verifyValidationToken(snapshot.validationToken);
+  if (!verified || verified.validUntil < new Date() || verified.status === 'BLOCKED') {
+    return { hasValidLicense: false };
+  }
+
+  return { hasValidLicense: true, license: verified, snapshot };
+});
+
+// ---------- printer bridge (docs/ARCHITECTURE.md — ported from GoBilling) ----------
+// Round 23 — receipts and labels are now two separately-configured printers.
+// `printerName` args from the bridge are repurposed as a role selector
+// ('receipt' | anything else treated as 'label') rather than being ignored;
+// printLabel/printBatch are always label-domain and printRaw is always
+// receipt-domain, so those don't need the caller to pass a role at all.
+function resolveRole(printerName: string | undefined): PrinterRole {
+  return printerName === 'receipt' ? 'receipt' : 'label';
+}
+
+ipcMain.handle('rt:printer-list', async () => getPrinterManager('label').listSystemPrinters());
+ipcMain.handle('rt:printer-default', async () => getPrinterManager('label').getSettings());
+ipcMain.handle('rt:printer-settings-get', async (_event, printerName: string) =>
+  getPrinterManager(resolveRole(printerName)).getSettings()
+);
+ipcMain.handle('rt:printer-settings-save', async (_event, printerName: string, settings) =>
+  getPrinterManager(resolveRole(printerName)).updateSettings(settings)
+);
+ipcMain.handle('rt:printer-print-label', async (_event, _printerName: string, labelData) =>
+  getPrinterManager('label').printLabel(labelData.template, labelData.data, labelData.copies ?? 1)
+);
+// Round 5 — Bulk Stock Entry's "print labels for this batch" action.
+// printer-api.ts's printBatch() already existed (loops printLabel per item,
+// aggregates a success count) but was never exposed through this bridge.
+ipcMain.handle('rt:printer-print-batch', async (_event, _printerName: string, labels) => getPrinterManager('label').printBatch(labels));
+ipcMain.handle('rt:printer-print-raw', async (_event, _printerName: string, rawData) =>
+  getPrinterManager('receipt').printRawCommands(rawData)
+);
+ipcMain.handle('rt:printer-print-test', async (_event, printerName: string) =>
+  getPrinterManager(resolveRole(printerName)).printTestLabel()
+);
+ipcMain.handle('rt:printer-test-connection', async (_event, printerName: string) =>
+  getPrinterManager(resolveRole(printerName)).testConnection()
+);
+
+// Round 23 — the full 3-role config (receipt/label/invoice), including the
+// fields (defaultLayout, invoice.silent) that live outside PrinterManager's
+// TSPL-oriented PrinterSettings shape entirely. Label's own printer name +
+// TSPL settings still round-trip through rt:printer-settings-save above (so
+// its live PrinterManager instance updates immediately); this save path is
+// for the receipt/invoice sections and for label's non-PrinterManager fields.
+ipcMain.handle('rt:printer-config-get', async () => readPrinterConfig());
+ipcMain.handle('rt:printer-config-save', async (_event, role: keyof PrinterConfig, patch: Record<string, unknown>) => {
+  const config = readPrinterConfig();
+  (config as any)[role] = { ...(config as any)[role], ...patch };
+  writePrinterConfig(config);
+  // Keep the receipt PrinterManager's in-memory printer name in sync so a
+  // saved name takes effect without requiring an app restart (label already
+  // does this via updateSettings(); receipt has no equivalent settings UI).
+  if (role === 'receipt' && typeof patch.printerName === 'string') {
+    getPrinterManager('receipt').updateSettings({ name: patch.printerName });
+  }
+  return config;
+});
+
+// Round 23 — A4/A5 invoices used to always fall through to the renderer's
+// plain window.open()+print(), which always shows the OS print dialog and
+// has no way to target a specific printer. This loads the already-built
+// invoice HTML into a hidden, throwaway window and prints it directly.
+ipcMain.handle('rt:printer-print-a4', async (_event, html: string, printerName: string, silent: boolean) => {
+  const printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+  try {
+    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    await new Promise<void>((resolve, reject) => {
+      printWindow.webContents.print(
+        { silent, deviceName: printerName, printBackground: true },
+        (success, errorType) => {
+          if (success) resolve();
+          else reject(new Error(errorType || 'Print failed'));
+        }
+      );
+    });
+    return { success: true };
+  } finally {
+    printWindow.destroy();
+  }
+});
+
+autoUpdater.on('update-available', () => mainWindow?.webContents.send('rt:update-status', { status: 'available' }));
+autoUpdater.on('update-downloaded', () => mainWindow?.webContents.send('rt:update-status', { status: 'downloaded' }));
+
+// ---------- backups (Round 7) ----------
+// Electron owns SCHEDULED backups end-to-end, directly at the filesystem
+// level (local copy, extra-folder copy, R2 upload) — this runs regardless of
+// whether anyone is logged into the renderer, so it can't go through the
+// backend's authenticated HTTP API. It writes the SAME on-disk manifest
+// format backend/src/routes/backups.ts reads (id/companyId/reason/sha256/
+// sizeBytes/createdAt), so the Settings UI's backup list shows both kinds
+// together. Anything the logged-in user explicitly triggers (manual backup,
+// restore, list) goes through that authenticated backend API instead — this
+// file only provides thin native-dialog utilities for those (folder/file
+// pickers), never duplicates the restore logic itself.
+const BACKUP_STARTUP_DELAY_MS = 5 * 60 * 1000;
+const BACKUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const LICENSE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+const LOCAL_KEEP_LATEST = 12;
+const EXTRA_FOLDER_KEEP_LATEST = 7;
+
+type BackupManifestLite = {
+  id: string;
+  companyId: string;
+  reason: string;
+  sha256: string;
+  sizeBytes: number;
+  createdAt: string;
+};
+
+type BackupSettings = { onlineBackupEnabled: boolean; extraFolders: string[] };
+type OffsiteBackupState = { lastUploadAt?: string; fileName?: string; bytes?: number; databaseHash?: string };
+
+function companiesDataDir() {
+  return path.join(app.getPath('userData'), 'companies');
+}
+function backupsRootDir() {
+  return path.join(app.getPath('userData'), 'backups');
+}
+function companyBackupDir(companyId: string) {
+  return path.join(backupsRootDir(), companyId);
+}
+function backupSettingsPath() {
+  return path.join(app.getPath('userData'), 'backup-settings.json');
+}
+function offsiteBackupStatePath(companyId: string) {
+  return path.join(companyBackupDir(companyId), 'offsite-backup-state.json');
+}
+
+function readBackupSettings(): BackupSettings {
+  try {
+    return { onlineBackupEnabled: false, extraFolders: [], ...JSON.parse(fs.readFileSync(backupSettingsPath(), 'utf8')) };
+  } catch {
+    return { onlineBackupEnabled: false, extraFolders: [] };
+  }
+}
+function writeBackupSettings(settings: BackupSettings) {
+  fs.mkdirSync(path.dirname(backupSettingsPath()), { recursive: true });
+  fs.writeFileSync(backupSettingsPath(), JSON.stringify(settings, null, 2));
+}
+
+function readOffsiteState(companyId: string): OffsiteBackupState {
+  try {
+    return JSON.parse(fs.readFileSync(offsiteBackupStatePath(companyId), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+function writeOffsiteState(companyId: string, state: OffsiteBackupState) {
+  fs.mkdirSync(path.dirname(offsiteBackupStatePath(companyId)), { recursive: true });
+  fs.writeFileSync(offsiteBackupStatePath(companyId), JSON.stringify(state, null, 2));
+}
+
+function isoStampSafe() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+function sha256File(filePath: string): string {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+/** Directory-scan fallback (pre-Round-9 behavior) — internal companies only, used when the backend can't be reached so a backend hiccup degrades to "internal only" rather than skipping every company's backup. */
+function listCompanyDbFilesFromDisk(): Array<{ companyId: string; dbPath: string }> {
+  const dir = companiesDataDir();
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith('.db'))
+    .map((f) => ({ companyId: f.replace(/\.db$/, ''), dbPath: path.join(dir, f) }));
+}
+
+/**
+ * Every company currently reachable on this machine — internal (fixed
+ * <userData>/companies/<id>.db) or external (Round 9: on a removable/external
+ * drive, only counted if that drive is plugged in right now). Asks the
+ * backend rather than scanning a fixed folder, since companies can now live
+ * elsewhere and only the backend can resolve an external company's current
+ * path (drivelist/PowerShell volume lookups are intentionally backend-only —
+ * see backend/src/lib/drives.ts). Falls back to the old directory-scan (which
+ * only ever covered internal companies anyway) if the backend isn't
+ * reachable, so one destination failing never blocks the others — same
+ * philosophy as this file's per-destination try/catch in
+ * runScheduledBackupCycle below.
+ */
+async function listCompanyDbFiles(): Promise<Array<{ companyId: string; dbPath: string }>> {
+  try {
+    const res = await fetch('http://localhost:4100/companies');
+    if (!res.ok) return listCompanyDbFilesFromDisk();
+    const payload = (await res.json()) as { companies?: Array<{ id: string; resolvedDbPath?: string }> };
+    if (!payload.companies) return listCompanyDbFilesFromDisk();
+    return payload.companies
+      .filter((c) => c.resolvedDbPath)
+      .map((c) => ({ companyId: c.id, dbPath: c.resolvedDbPath! }));
+  } catch {
+    return listCompanyDbFilesFromDisk();
+  }
+}
+
+function createLocalBackup(companyId: string, dbPath: string, reason: string): BackupManifestLite {
+  const dir = companyBackupDir(companyId);
+  fs.mkdirSync(dir, { recursive: true });
+  const id = `rasetu-${reason}-${isoStampSafe()}`;
+  const backupPath = path.join(dir, `${id}.db`);
+  fs.copyFileSync(dbPath, backupPath);
+  const manifest: BackupManifestLite = {
+    id,
+    companyId,
+    reason,
+    sha256: sha256File(backupPath),
+    sizeBytes: fs.statSync(backupPath).size,
+    createdAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(path.join(dir, `${id}.manifest.json`), JSON.stringify(manifest, null, 2));
+  return manifest;
+}
+
+function pruneAutomatedBackups(companyId: string, keepLatest: number) {
+  const dir = companyBackupDir(companyId);
+  if (!fs.existsSync(dir)) return;
+  const automated = fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith('.manifest.json') && f !== 'offsite-backup-state.json')
+    .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as BackupManifestLite)
+    .filter((m) => m.reason !== 'manual')
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  for (const m of automated.slice(keepLatest)) {
+    fs.rmSync(path.join(dir, `${m.id}.db`), { force: true });
+    fs.rmSync(path.join(dir, `${m.id}.manifest.json`), { force: true });
+  }
+}
+
+function pruneExtraFolderCopies(folder: string, companyId: string, keepLatest: number) {
+  if (!fs.existsSync(folder)) return;
+  const prefix = `rasetu-backup-${companyId}-`;
+  const files = fs
+    .readdirSync(folder)
+    .filter((f) => f.startsWith(prefix) && f.endsWith('.db'))
+    .sort()
+    .reverse();
+  for (const f of files.slice(keepLatest)) {
+    try {
+      fs.rmSync(path.join(folder, f), { force: true });
+    } catch {
+      // folder might be a cloud-sync mount with a file mid-sync — tolerate silently, matches GoBilling's own behavior
+    }
+  }
+}
+
+/** Gzips + uploads a backup file to Cloudflare R2 via the backup-upload Supabase Edge Function (presigned PUT URL). Skips if unchanged since the last upload. */
+async function uploadToR2(companyId: string, backupFilePath: string): Promise<void> {
+  const snapshot = readLicenseSnapshot();
+  if (!snapshot) throw new Error('No active license — cloud backup needs an activated license');
+
+  const gz = zlib.gzipSync(fs.readFileSync(backupFilePath));
+  const hash = crypto.createHash('sha256').update(gz).digest('hex');
+
+  const state = readOffsiteState(companyId);
+  if (state.databaseHash === hash) return; // nothing changed since the last upload — save bandwidth
+
+  const fileName = `${companyId}-${isoStampSafe()}.db.gz`;
+  const res = await fetch(`${LICENSE_FUNCTIONS_URL}/backup-upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${LICENSE_ANON_KEY}` },
+    body: JSON.stringify({ key: snapshot.licenseKey, machineId: snapshot.machineId, companyId, fileName, sizeBytes: gz.length }),
+  });
+  const payload = (await res.json().catch(() => ({}))) as { data?: { uploadUrl?: string; fileName?: string }; message?: string };
+  if (!res.ok || !payload.data?.uploadUrl) throw new Error(payload.message ?? 'Failed to get an upload URL for cloud backup');
+
+  const putRes = await fetch(payload.data.uploadUrl, { method: 'PUT', body: gz, headers: { 'Content-Type': 'application/gzip' } });
+  if (!putRes.ok) throw new Error(`Cloud backup upload failed with status ${putRes.status}`);
+
+  writeOffsiteState(companyId, { lastUploadAt: new Date().toISOString(), fileName: payload.data.fileName ?? fileName, bytes: gz.length, databaseHash: hash });
+}
+
+/** Local backup + every configured extra folder + opt-in R2 upload, for every company on this machine. Each destination is independent — one failing (an unplugged drive, no internet) must never block the others. */
+async function runScheduledBackupCycle(): Promise<void> {
+  const settings = readBackupSettings();
+  for (const { companyId, dbPath } of await listCompanyDbFiles()) {
+    try {
+      const manifest = createLocalBackup(companyId, dbPath, 'scheduled');
+      pruneAutomatedBackups(companyId, LOCAL_KEEP_LATEST);
+      const backupFilePath = path.join(companyBackupDir(companyId), `${manifest.id}.db`);
+
+      for (const folder of settings.extraFolders) {
+        try {
+          fs.mkdirSync(folder, { recursive: true });
+          fs.copyFileSync(backupFilePath, path.join(folder, `rasetu-backup-${companyId}-${isoStampSafe()}.db`));
+          pruneExtraFolderCopies(folder, companyId, EXTRA_FOLDER_KEEP_LATEST);
+        } catch (err) {
+          console.error('[backup] extra-folder copy failed', folder, err);
+        }
+      }
+
+      if (settings.onlineBackupEnabled) {
+        try {
+          await uploadToR2(companyId, backupFilePath);
+        } catch (err) {
+          console.error('[backup] R2 upload failed', companyId, err);
+        }
+      }
+    } catch (err) {
+      console.error('[backup] scheduled backup failed for company', companyId, err);
+    }
+  }
+}
+
+/** Best-effort background license re-check, mirrors src/lib/license.ts's revalidateLicenseInBackground() but from the main process so it can broadcast rt:license-blocked if a check newly blocks the app. */
+async function runLicenseRevalidation(): Promise<void> {
+  const snapshot = readLicenseSnapshot();
+  if (!snapshot) return;
+
+  try {
+    const res = await fetch(`${LICENSE_FUNCTIONS_URL}/license-validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${LICENSE_ANON_KEY}` },
+      body: JSON.stringify({ key: snapshot.licenseKey, machineId: snapshot.machineId }),
+    });
+    const payload = (await res.json().catch(() => ({}))) as { data?: { ok?: boolean; validationToken?: string }; valid?: boolean };
+    const ok = payload.data?.ok ?? payload.valid ?? false;
+    if (!res.ok || !ok || !payload.data?.validationToken) return; // offline or a transient failure — leave the last-known-good snapshot in place
+
+    fs.writeFileSync(
+      licenseSnapshotPath(),
+      JSON.stringify({ ...snapshot, validationToken: payload.data.validationToken, lastValidAt: new Date().toISOString() }, null, 2)
+    );
+
+    const verified = verifyValidationToken(payload.data.validationToken);
+    if (verified?.status === 'BLOCKED') {
+      mainWindow?.webContents.send('rt:license-blocked', { status: verified.status });
+    }
+  } catch {
+    // offline — same tolerance as revalidateLicenseInBackground()
+  }
+}
+
+ipcMain.handle('rt:backup-run-now', async () => {
+  await runScheduledBackupCycle();
+  return { ranAt: new Date().toISOString() };
+});
+
+ipcMain.handle('rt:offsite-backup-now', async () => {
+  const settings = readBackupSettings();
+  if (!settings.onlineBackupEnabled) throw new Error('Cloud backup is not enabled — turn it on first.');
+  const results: Array<{ companyId: string; ok: boolean; error?: string }> = [];
+  for (const { companyId, dbPath } of await listCompanyDbFiles()) {
+    try {
+      const manifest = createLocalBackup(companyId, dbPath, 'scheduled');
+      await uploadToR2(companyId, path.join(companyBackupDir(companyId), `${manifest.id}.db`));
+      results.push({ companyId, ok: true });
+    } catch (err) {
+      results.push({ companyId, ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return { results };
+});
+
+ipcMain.handle('rt:online-backup-set', (_event, enabled: boolean) => {
+  const settings = readBackupSettings();
+  writeBackupSettings({ ...settings, onlineBackupEnabled: enabled });
+  return { onlineBackupEnabled: enabled };
+});
+
+ipcMain.handle('rt:backup-extra-folders-get', () => readBackupSettings().extraFolders);
+
+ipcMain.handle('rt:backup-extra-folders-add', async () => {
+  if (!mainWindow) return readBackupSettings().extraFolders;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    title: 'Choose a backup destination (e.g. a Google Drive / OneDrive sync folder, or an external drive)',
+  });
+  if (result.canceled || !result.filePaths[0]) return readBackupSettings().extraFolders;
+  const settings = readBackupSettings();
+  const folders = [...new Set([...settings.extraFolders, result.filePaths[0]])];
+  writeBackupSettings({ ...settings, extraFolders: folders });
+  return folders;
+});
+
+ipcMain.handle('rt:backup-extra-folders-remove', (_event, folder: string) => {
+  const settings = readBackupSettings();
+  const folders = settings.extraFolders.filter((f) => f !== folder);
+  writeBackupSettings({ ...settings, extraFolders: folders });
+  return folders;
+});
+
+ipcMain.handle('rt:backup-export-to', async (_event, companyId: string, backupId: string) => {
+  const sourcePath = path.join(companyBackupDir(companyId), `${backupId}.db`);
+  if (!fs.existsSync(sourcePath)) throw new Error('That backup file no longer exists.');
+  if (!mainWindow) throw new Error('No window available for the save dialog.');
+
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export backup to...',
+    defaultPath: `${backupId}.db`,
+    filters: [{ name: 'RaSetu database backup', extensions: ['db'] }],
+  });
+  if (result.canceled || !result.filePath) return { exported: false };
+  fs.copyFileSync(sourcePath, result.filePath);
+  return { exported: true, path: result.filePath };
+});
+
+// Ingests an externally-picked .db file into this company's recognized
+// backup format (copy + manifest) so the existing, already-checksum-verified
+// POST /restore endpoint can restore from it uniformly — Electron never
+// performs the restore itself, it just makes an external file look like any
+// other backup on disk.
+ipcMain.handle('rt:backup-import-external', async (_event, companyId: string) => {
+  if (!mainWindow) throw new Error('No window available for the open dialog.');
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    title: 'Import a backup file (.db)',
+    filters: [{ name: 'RaSetu database backup', extensions: ['db'] }],
+  });
+  if (result.canceled || !result.filePaths[0]) return { imported: false };
+
+  const manifest = createLocalBackup(companyId, result.filePaths[0], 'imported');
+  return { imported: true, backupId: manifest.id };
+});

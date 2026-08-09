@@ -1,0 +1,49 @@
+{
+  "key": "cloth",
+  "name": "Cloth / Garment Store",
+  "terminology": {
+    "itemLabel": "Design",
+    "itemNoLabel": "Design No.",
+    "categoryLabel": "Category",
+    "partyCustomerLabel": "Customer",
+    "partySupplierLabel": "Supplier"
+  },
+  "itemAttributes": [
+    { "key": "category", "label": "Category", "type": "text", "required": true },
+    { "key": "brand", "label": "Brand", "type": "text", "required": false },
+    { "key": "size", "label": "Size", "type": "text", "required": false },
+    { "key": "color", "label": "Color", "type": "text", "required": false }
+  ],
+  "units": {
+    "allowed": ["PCS", "MTR", "SET"],
+    "default": "PCS",
+    "allowDecimalQty": {
+      "PCS": false,
+      "SET": false,
+      "MTR": true
+    }
+  },
+  "gst": {
+    "inclusiveByDefault": true,
+    "hsnGroups": [
+      { "hsnPrefix": "61", "description": "Knitted apparel" },
+      { "hsnPrefix": "62", "description": "Woven apparel" },
+      { "hsnPrefix": "63", "description": "Other made-up textile articles" }
+    ],
+    "mrpSlabRule": {
+      "description": "Auto GST slab by MRP for cloth",
+      "thresholdMrp": 1000,
+      "rateBelowOrEqual": 5,
+      "rateAbove": 12
+    }
+  },
+  "labels": {
+    "defaultTemplate": "shelf-label",
+    "barcodeContent": "sku",
+    "templates": ["small-tag", "medium-tag", "shelf-label"]
+  },
+  "loyalty": {
+    "earnEnabled": true,
+    "redeemEnabled": false
+  }
+}
