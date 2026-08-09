@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, dialog } from 'electron';
-import electronUpdater from 'electron-updater';
+import electronUpdater, { type Logger } from 'electron-updater';
 const { autoUpdater } = electronUpdater;
 import nodeMachineId from 'node-machine-id';
 const { machineIdSync } = nodeMachineId;
@@ -22,6 +22,40 @@ let backendProcess: ChildProcess | null = null;
 
 const SUPABASE_URL = 'https://doopelkfucwiogrylysj.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_Fp4R_QUz_d_Hzs0pBA2eKw_986nPQzz';
+
+function isBrokenPipeError(error: unknown) {
+  return error instanceof Error && 'code' in error && error.code === 'EPIPE';
+}
+
+function swallowBrokenPipe(error: unknown) {
+  if (!isBrokenPipeError(error)) throw error;
+}
+
+process.stdout?.on('error', swallowBrokenPipe);
+process.stderr?.on('error', swallowBrokenPipe);
+
+function mainLogPath() {
+  return path.join(app.getPath('userData'), 'main.log');
+}
+
+function writeMainLog(level: string, message?: unknown) {
+  try {
+    fs.mkdirSync(path.dirname(mainLogPath()), { recursive: true });
+    const text = message instanceof Error ? `${message.stack ?? message.message}` : typeof message === 'string' ? message : JSON.stringify(message);
+    fs.appendFileSync(mainLogPath(), `[${new Date().toISOString()}] [${level}] ${text ?? ''}\n`);
+  } catch {
+    // Logging must never crash the packaged desktop app.
+  }
+}
+
+const fileLogger: Logger = {
+  info: (message?: unknown) => writeMainLog('info', message),
+  warn: (message?: unknown) => writeMainLog('warn', message),
+  error: (message?: unknown) => writeMainLog('error', message),
+  debug: (message: string) => writeMainLog('debug', message),
+};
+
+autoUpdater.logger = fileLogger;
 
 function backendSecretPath() {
   return path.join(app.getPath('userData'), 'backend-secret.key');
@@ -106,7 +140,13 @@ app.whenReady().then(() => {
   createWindow();
 
   if (!isDev) {
-    void autoUpdater.checkForUpdatesAndNotify();
+    void autoUpdater.checkForUpdatesAndNotify().catch((err: unknown) => {
+      writeMainLog('warn', err);
+      mainWindow?.webContents.send('rt:update-status', {
+        status: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 
   // Round 7 — background backup cycle (local + extra folders + opt-in R2)
@@ -153,7 +193,17 @@ ipcMain.handle('rt:backend-restart', () => {
   backendProcess?.kill();
   startBackend();
 });
-ipcMain.handle('rt:update-check', () => autoUpdater.checkForUpdates());
+ipcMain.handle('rt:update-check', async () => {
+  try {
+    return await autoUpdater.checkForUpdates();
+  } catch (err) {
+    writeMainLog('warn', err);
+    return {
+      updateInfo: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
 ipcMain.handle('rt:update-install', () => autoUpdater.quitAndInstall());
 ipcMain.handle('rt:get-machine-id', () => machineIdSync(true));
 
@@ -307,6 +357,13 @@ ipcMain.handle('rt:printer-print-a4', async (_event, html: string, printerName: 
 
 autoUpdater.on('update-available', () => mainWindow?.webContents.send('rt:update-status', { status: 'available' }));
 autoUpdater.on('update-downloaded', () => mainWindow?.webContents.send('rt:update-status', { status: 'downloaded' }));
+autoUpdater.on('error', (err) => {
+  writeMainLog('warn', err);
+  mainWindow?.webContents.send('rt:update-status', {
+    status: 'error',
+    message: err instanceof Error ? err.message : String(err),
+  });
+});
 
 // ---------- backups (Round 7) ----------
 // Electron owns SCHEDULED backups end-to-end, directly at the filesystem
