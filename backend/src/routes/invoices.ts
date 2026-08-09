@@ -467,6 +467,99 @@ invoicesRouter.delete(
   })
 );
 
+const deleteLastInvoiceSchema = z.object({
+  confirmation: z.string(),
+});
+
+invoicesRouter.delete(
+  '/last/safe',
+  requireRole('ADMIN', 'SUPER_ADMIN'),
+  asyncHandler(async (req, res) => {
+    const prisma = requireCompanyDb(req);
+    const input = deleteLastInvoiceSchema.parse(req.body ?? {});
+    if (input.confirmation !== 'DELETE LAST INVOICE') {
+      throw new HttpError(400, 'Type DELETE LAST INVOICE to confirm.');
+    }
+
+    const invoice = await prisma.invoice.findFirst({
+      where: { companyId: req.params.companyId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      include: { items: true, payments: true, creditNotes: true },
+    });
+    if (!invoice) throw new HttpError(404, 'No invoice found to delete.');
+    if (invoice.payments.length > 0) throw new HttpError(400, 'Cannot delete the last invoice because payments are linked to it. Cancel/return it instead.');
+    if (invoice.creditNotes.length > 0) throw new HttpError(400, 'Cannot delete the last invoice because sales returns/credit notes are linked to it.');
+
+    if (invoice.status === 'POSTED' || invoice.status === 'CANCELLED') {
+      const sameFyIssued = await prisma.invoice.findMany({
+        where: { companyId: invoice.companyId, fyLabel: invoice.fyLabel, status: { in: ['POSTED', 'CANCELLED'] } },
+        select: { id: true, number: true },
+      });
+      const thisSeq = parseInt(invoice.number.split('/').pop() ?? '', 10);
+      const maxSeq = sameFyIssued.reduce((max, row) => {
+        const seq = parseInt(row.number.split('/').pop() ?? '', 10);
+        return Number.isFinite(seq) && seq > max ? seq : max;
+      }, 0);
+      if (!Number.isFinite(thisSeq) || thisSeq !== maxSeq) {
+        throw new HttpError(400, 'Only the latest issued invoice number can be deleted safely.');
+      }
+    }
+
+    if (invoice.partyId) {
+      const invoiceLedger = await prisma.ledgerEntry.findMany({
+        where: { invoiceId: invoice.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      const latestInvoiceLedgerAt = invoiceLedger[0]?.createdAt;
+      if (latestInvoiceLedgerAt) {
+        const laterLedger = await prisma.ledgerEntry.findFirst({
+          where: {
+            partyId: invoice.partyId,
+            createdAt: { gt: latestInvoiceLedgerAt },
+            NOT: { invoiceId: invoice.id },
+          },
+        });
+        if (laterLedger) {
+          throw new HttpError(400, 'Cannot delete the last invoice because this party has later ledger activity.');
+        }
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const movements = await tx.stockMovement.findMany({ where: { refType: 'Invoice', refId: invoice.id } });
+      const stockByItem = new Map<string, number>();
+      for (const movement of movements) {
+        stockByItem.set(movement.itemId, (stockByItem.get(movement.itemId) ?? 0) + Number(movement.qty));
+      }
+      for (const [itemId, qtyEffect] of stockByItem) {
+        if (qtyEffect !== 0) await tx.item.update({ where: { id: itemId }, data: { stockQty: { decrement: qtyEffect } } });
+      }
+
+      await tx.stockMovement.deleteMany({ where: { refType: 'Invoice', refId: invoice.id } });
+      await tx.ledgerEntry.deleteMany({ where: { invoiceId: invoice.id } });
+      if (invoice.partyId) {
+        const lastEntry = await tx.ledgerEntry.findFirst({ where: { partyId: invoice.partyId }, orderBy: { date: 'desc' } });
+        await tx.party.update({ where: { id: invoice.partyId }, data: { balance: lastEntry?.balance ?? 0 } });
+      }
+      await tx.invoiceItem.deleteMany({ where: { invoiceId: invoice.id } });
+      await tx.invoice.delete({ where: { id: invoice.id } });
+    });
+
+    await recordMutation(prisma, {
+      userId: req.user?.id,
+      entity: 'Invoice',
+      entityId: invoice.id,
+      action: 'DELETE',
+      oldValue: invoice,
+      tableName: 'invoice',
+      syncAction: 'DELETE',
+      payload: { id: invoice.id, number: invoice.number },
+    });
+
+    res.json({ deletedInvoice: { id: invoice.id, number: invoice.number, status: invoice.status } });
+  })
+);
+
 // Due date is meant to keep moving after posting as a credit customer's
 // promise-to-pay date shifts — distinct from PUT /:id, which only touches
 // DRAFT/HELD invoices (posted ones are correction-via-credit-note territory).

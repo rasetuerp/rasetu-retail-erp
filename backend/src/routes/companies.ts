@@ -7,7 +7,7 @@ import { asyncHandler } from '../lib/async-handler.js';
 import { recordMutation } from '../lib/mutation-log.js';
 import { hashPassword } from '../lib/password.js';
 import { signAuthToken } from '../lib/jwt.js';
-import { requireAuth, requireCompanyDb } from '../lib/auth-middleware.js';
+import { requireAuth, requireCompanyDb, requireRole } from '../lib/auth-middleware.js';
 import { HttpError } from '../lib/http-error.js';
 import { findDriveByVolumeId } from '../lib/drives.js';
 import { externalDbDir, externalDbPath, resolveExternalCompanyPath } from '../lib/company-storage.js';
@@ -247,6 +247,100 @@ companiesRouter.patch(
     });
 
     res.json({ company: updated });
+  })
+);
+
+async function companyTrialDataSummary(companyDb: ReturnType<typeof requireCompanyDb>, companyId: string) {
+  const [
+    invoices,
+    postedInvoices,
+    payments,
+    purchases,
+    creditNotes,
+    debitNotes,
+    stockMovements,
+    itemsWithStock,
+    partyBalances,
+    lastInvoice,
+  ] = await Promise.all([
+    companyDb.invoice.count({ where: { companyId } }),
+    companyDb.invoice.count({ where: { companyId, status: { in: ['POSTED', 'CANCELLED'] } } }),
+    companyDb.payment.count({ where: { companyId } }),
+    companyDb.purchase.count({ where: { companyId } }),
+    companyDb.creditNote.count({ where: { companyId } }),
+    companyDb.debitNote.count({ where: { companyId } }),
+    companyDb.stockMovement.count({ where: { item: { companyId } } }),
+    companyDb.item.count({ where: { companyId, stockQty: { not: 0 } } }),
+    companyDb.party.count({ where: { companyId, balance: { not: 0 } } }),
+    companyDb.invoice.findFirst({
+      where: { companyId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, number: true, status: true, total: true, createdAt: true },
+    }),
+  ]);
+
+  return {
+    invoices,
+    postedInvoices,
+    payments,
+    purchases,
+    creditNotes,
+    debitNotes,
+    stockMovements,
+    itemsWithStock,
+    partyBalances,
+    lastInvoice,
+  };
+}
+
+companiesRouter.get(
+  '/:companyId/trial-data-summary',
+  requireAuth,
+  requireRole('ADMIN', 'SUPER_ADMIN'),
+  asyncHandler(async (req, res) => {
+    const companyDb = requireCompanyDb(req);
+    res.json({ summary: await companyTrialDataSummary(companyDb, req.params.companyId) });
+  })
+);
+
+const clearTrialDataSchema = z.object({
+  confirmation: z.string(),
+});
+
+companiesRouter.post(
+  '/:companyId/clear-trial-data',
+  requireAuth,
+  requireRole('ADMIN', 'SUPER_ADMIN'),
+  asyncHandler(async (req, res) => {
+    const companyDb = requireCompanyDb(req);
+    const input = clearTrialDataSchema.parse(req.body);
+    if (input.confirmation !== 'CLEAR TRIAL DATA') {
+      throw new HttpError(400, 'Type CLEAR TRIAL DATA to confirm.');
+    }
+
+    const before = await companyTrialDataSummary(companyDb, req.params.companyId);
+    await companyDb.$transaction(async (tx) => {
+      await tx.payment.deleteMany({ where: { companyId: req.params.companyId } });
+      await tx.ledgerEntry.deleteMany({ where: { party: { companyId: req.params.companyId } } });
+      await tx.stockMovement.deleteMany({ where: { item: { companyId: req.params.companyId } } });
+
+      await tx.debitNoteItem.deleteMany({ where: { debitNote: { companyId: req.params.companyId } } });
+      await tx.debitNote.deleteMany({ where: { companyId: req.params.companyId } });
+      await tx.creditNoteItem.deleteMany({ where: { creditNote: { companyId: req.params.companyId } } });
+      await tx.creditNote.deleteMany({ where: { companyId: req.params.companyId } });
+
+      await tx.purchaseItem.deleteMany({ where: { purchase: { companyId: req.params.companyId } } });
+      await tx.purchase.deleteMany({ where: { companyId: req.params.companyId } });
+      await tx.invoiceItem.deleteMany({ where: { invoice: { companyId: req.params.companyId } } });
+      await tx.invoice.deleteMany({ where: { companyId: req.params.companyId } });
+
+      await tx.item.updateMany({ where: { companyId: req.params.companyId }, data: { stockQty: 0 } });
+      await tx.party.updateMany({ where: { companyId: req.params.companyId }, data: { balance: 0 } });
+      await tx.auditLog.deleteMany({});
+      await tx.syncQueue.deleteMany({});
+    });
+
+    res.json({ before, summary: await companyTrialDataSummary(companyDb, req.params.companyId) });
   })
 );
 

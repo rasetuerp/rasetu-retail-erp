@@ -860,6 +860,161 @@ const reorderBtn: React.CSSProperties = { padding: '4px 8px', background: 'trans
 // vendor-side action (updating the Supabase machine_id by hand); adding
 // self-service transfer would be new attack surface for a need this round
 // explicitly chose not to build.
+type TrialDataSummary = {
+  invoices: number;
+  postedInvoices: number;
+  payments: number;
+  purchases: number;
+  creditNotes: number;
+  debitNotes: number;
+  stockMovements: number;
+  itemsWithStock: number;
+  partyBalances: number;
+  lastInvoice: { id: string; number: string; status: string; total: string; createdAt: string } | null;
+};
+
+function DataManagementCard() {
+  const { session } = useSession();
+  const [summary, setSummary] = useState<TrialDataSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [working, setWorking] = useState<'summary' | 'clear' | 'delete-last' | null>(null);
+  const clearRef = useRef<HTMLInputElement>(null);
+  const deleteLastRef = useRef<HTMLInputElement>(null);
+
+  async function loadSummary() {
+    if (!session) return;
+    setWorking('summary');
+    setError(null);
+    try {
+      const res = await apiRequest<{ summary: TrialDataSummary }>(`/companies/${session.companyId}/trial-data-summary`, { token: session.token });
+      setSummary(res.summary);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to load data summary');
+    } finally {
+      setWorking(null);
+    }
+  }
+
+  useEffect(() => {
+    queueMicrotask(() => void loadSummary());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.companyId]);
+
+  async function clearTrialData() {
+    if (!session) return;
+    setWorking('clear');
+    setError(null);
+    setStatus(null);
+    try {
+      const res = await apiRequest<{ summary: TrialDataSummary }>(`/companies/${session.companyId}/clear-trial-data`, {
+        method: 'POST',
+        token: session.token,
+        body: { confirmation: clearRef.current?.value ?? '' },
+      });
+      setSummary(res.summary);
+      if (clearRef.current) clearRef.current.value = '';
+      setStatus('Trial transactions cleared. Item stock and party balances are reset to zero.');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to clear trial data');
+    } finally {
+      setWorking(null);
+    }
+  }
+
+  async function deleteLastInvoice() {
+    if (!session) return;
+    setWorking('delete-last');
+    setError(null);
+    setStatus(null);
+    try {
+      const res = await apiRequest<{ deletedInvoice: { number: string } }>(`/companies/${session.companyId}/invoices/last/safe`, {
+        method: 'DELETE',
+        token: session.token,
+        body: { confirmation: deleteLastRef.current?.value ?? '' },
+      });
+      if (deleteLastRef.current) deleteLastRef.current.value = '';
+      setStatus(`Deleted last invoice ${res.deletedInvoice.number}.`);
+      await loadSummary();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Last invoice is not safe to delete');
+    } finally {
+      setWorking(null);
+    }
+  }
+
+  const counts = summary
+    ? [
+        ['Invoices', summary.invoices],
+        ['Posted/cancelled invoices', summary.postedInvoices],
+        ['Payments', summary.payments],
+        ['Purchases', summary.purchases],
+        ['Sales returns', summary.creditNotes],
+        ['Purchase returns', summary.debitNotes],
+        ['Stock movements', summary.stockMovements],
+        ['Items with stock', summary.itemsWithStock],
+        ['Parties with balance', summary.partyBalances],
+      ]
+    : [];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 720 }}>
+      {error && <div style={{ background: color.alertTint, color: color.alert, padding: 10, borderRadius: theme.radiusSm, fontSize: 13 }}>{error}</div>}
+      {status && <div style={{ background: color.moneyTint, color: color.money, padding: 10, borderRadius: theme.radiusSm, fontSize: 13 }}>{status}</div>}
+
+      <div style={{ background: color.paperRaised, border: `1px solid ${color.line}`, borderRadius: theme.radius, padding: 18, boxShadow: theme.shadowSm }}>
+        <div style={groupHeadingStyle}>Current Trial Data</div>
+        {summary ? (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 }}>
+              {counts.map(([label, value]) => (
+                <div key={label} style={{ background: color.paper, border: `1px solid ${color.lineSoft}`, borderRadius: theme.radiusSm, padding: 10 }}>
+                  <div style={{ fontSize: 11, color: color.inkFaint, textTransform: 'uppercase' }}>{label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: color.ink }}>{value}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 10, fontSize: 12.5, color: color.inkSoft }}>
+              Last invoice: {summary.lastInvoice ? `${summary.lastInvoice.number} (${summary.lastInvoice.status})` : 'None'}
+            </div>
+          </>
+        ) : (
+          <div style={{ color: color.inkFaint, fontSize: 13 }}>{working === 'summary' ? 'Loading summary...' : 'No summary loaded.'}</div>
+        )}
+        <button onClick={() => void loadSummary()} disabled={working !== null} style={{ ...reorderBtn, marginTop: 12 }}>Refresh Summary</button>
+      </div>
+
+      <div style={{ background: color.paperRaised, border: `1px solid ${color.alert}55`, borderRadius: theme.radius, padding: 18, boxShadow: theme.shadowSm }}>
+        <div style={{ ...groupHeadingStyle, color: color.alert }}>Clear Trial Transactions</div>
+        <p style={{ margin: '0 0 12px', color: color.inkSoft, fontSize: 12.5, lineHeight: 1.45 }}>
+          Removes invoices, payments, purchases, returns, ledger entries and stock movements. Keeps users, shop profile, item master, parties, receipt settings and label designs.
+        </p>
+        <label style={labelStyle}>
+          Type CLEAR TRIAL DATA
+          <input ref={clearRef} style={inputStyle} placeholder="CLEAR TRIAL DATA" />
+        </label>
+        <button onClick={() => void clearTrialData()} disabled={working !== null} style={{ marginTop: 10, padding: '9px 16px', background: color.alert, color: '#fff', border: 'none', borderRadius: theme.radiusSm, cursor: 'pointer', fontSize: 13.5, fontWeight: 700 }}>
+          {working === 'clear' ? 'Clearing...' : 'Clear Trial Data'}
+        </button>
+      </div>
+
+      <div style={{ background: color.paperRaised, border: `1px solid ${color.line}`, borderRadius: theme.radius, padding: 18, boxShadow: theme.shadowSm }}>
+        <div style={groupHeadingStyle}>Delete Last Invoice</div>
+        <p style={{ margin: '0 0 12px', color: color.inkSoft, fontSize: 12.5, lineHeight: 1.45 }}>
+          Only works when the last invoice has no payments, no returns, no later ledger activity, and is the latest issued number. Otherwise use cancel or sales return.
+        </p>
+        <label style={labelStyle}>
+          Type DELETE LAST INVOICE
+          <input ref={deleteLastRef} style={inputStyle} placeholder="DELETE LAST INVOICE" />
+        </label>
+        <button onClick={() => void deleteLastInvoice()} disabled={working !== null || !summary?.lastInvoice} style={{ marginTop: 10, padding: '9px 16px', background: color.ledger, color: '#fff', border: 'none', borderRadius: theme.radiusSm, cursor: 'pointer', fontSize: 13.5, fontWeight: 700 }}>
+          {working === 'delete-last' ? 'Checking...' : 'Delete Last Invoice If Safe'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function maskLicenseKey(key: string): string {
   if (key.length <= 8) return key;
   return `${key.slice(0, 4)}••••${key.slice(-4)}`;
@@ -1126,7 +1281,7 @@ function HelpCard() {
 // fetch/save logic untouched; `visible` on each section just reuses the same
 // role/window.rasetu checks that used to gate each card's `{cond && <Card/>}`
 // line directly.
-export type SectionKey = 'profile' | 'items' | 'billing' | 'license' | 'account' | 'help';
+export type SectionKey = 'profile' | 'items' | 'billing' | 'data' | 'license' | 'account' | 'help';
 
 export function SettingsPage({ initialSection }: { initialSection?: SectionKey } = {}) {
   const { session } = useSession();
@@ -1329,6 +1484,7 @@ export function SettingsPage({ initialSection }: { initialSection?: SectionKey }
         </div>
       ),
     },
+    { key: 'data', label: 'Data Reset', visible: isAdmin, render: () => <DataManagementCard /> },
     { key: 'license', label: 'License', visible: isAdmin && isDesktop, render: () => <LicenseStatusCard /> },
     { key: 'account', label: 'Account & Security', visible: true, render: () => <MyAccountCard /> },
     { key: 'help', label: 'Help & FAQ', visible: true, render: () => <HelpCard /> },
