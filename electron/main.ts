@@ -20,20 +20,55 @@ const isDev = !app.isPackaged;
 let mainWindow: BrowserWindow | null = null;
 let backendProcess: ChildProcess | null = null;
 
+const SUPABASE_URL = 'https://doopelkfucwiogrylysj.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_Fp4R_QUz_d_Hzs0pBA2eKw_986nPQzz';
+
+function backendSecretPath() {
+  return path.join(app.getPath('userData'), 'backend-secret.key');
+}
+
+function readOrCreateBackendSecret() {
+  const secretPath = backendSecretPath();
+  try {
+    const existing = fs.readFileSync(secretPath, 'utf8').trim();
+    if (existing.length >= 32) return existing;
+  } catch {
+    // First run: create a per-install JWT signing secret below.
+  }
+
+  const secret = crypto.randomBytes(32).toString('hex');
+  fs.mkdirSync(path.dirname(secretPath), { recursive: true });
+  fs.writeFileSync(secretPath, secret, { mode: 0o600 });
+  return secret;
+}
+
 function startBackend() {
   const backendEntry = isDev
     ? path.join(process.cwd(), 'backend', 'dist', 'index.js')
-    : path.join(process.resourcesPath, 'backend', 'dist', 'index.js');
+    : path.join(process.resourcesPath, 'app.asar.unpacked', 'backend', 'dist', 'index.js');
+
+  const logPath = path.join(app.getPath('userData'), 'backend.log');
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const logFd = fs.openSync(logPath, 'a');
 
   backendProcess = spawn(process.execPath, [backendEntry], {
     // Round 4: one catalog DB + one file per company, rooted under the OS
     // per-user data directory rather than inside the app bundle (see
     // backend/src/db/company-registry.ts).
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', RASETU_DATA_DIR: app.getPath('userData') },
-    stdio: 'inherit',
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      RASETU_DATA_DIR: app.getPath('userData'),
+      JWT_SECRET: process.env.JWT_SECRET ?? readOrCreateBackendSecret(),
+      JWT_TTL_HOURS: process.env.JWT_TTL_HOURS ?? '12',
+      SUPABASE_URL: process.env.SUPABASE_URL ?? SUPABASE_URL,
+      SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY ?? SUPABASE_ANON_KEY,
+    },
+    stdio: ['ignore', logFd, logFd],
   });
 
   backendProcess.on('exit', (code) => {
+    fs.closeSync(logFd);
     mainWindow?.webContents.send('rt:backend-status', { running: false, code });
   });
 }
@@ -125,8 +160,8 @@ ipcMain.handle('rt:get-machine-id', () => machineIdSync(true));
 // Must be kept in sync with src/lib/license.ts's identical constants — main.ts
 // needs its own copy for the background license-revalidation and R2-backup
 // calls below (Node/Electron main process, can't import renderer-side modules).
-const LICENSE_FUNCTIONS_URL = 'https://doopelkfucwiogrylysj.supabase.co/functions/v1';
-const LICENSE_ANON_KEY = 'sb_publishable_Fp4R_QUz_d_Hzs0pBA2eKw_986nPQzz';
+const LICENSE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
+const LICENSE_ANON_KEY = SUPABASE_ANON_KEY;
 
 // ---------- licensing (docs/COMMERCIAL.md, Round 4) ----------
 // One license per installed copy (machine), not per company — gates the
