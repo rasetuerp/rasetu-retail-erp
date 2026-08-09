@@ -183,6 +183,16 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
   const [printableInvoice, setPrintableInvoice] = useState<PrintableInvoice | null>(null);
   const [thermalLayout, setThermalLayout] = useState<ThermalLayout>('receipt');
   const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>({
+    shopNameText: '',
+    shopNameFontSize: 16,
+    localShopNameText: '',
+    localShopNameFontSize: 16,
+    headerLine1Text: '',
+    headerLine1FontSize: 12,
+    headerLine2Text: '',
+    headerLine2FontSize: 10,
+    headerLine3Text: '',
+    headerLine3FontSize: 10,
     exchangePolicyText: '',
     footerText: '',
     customMessageText: '',

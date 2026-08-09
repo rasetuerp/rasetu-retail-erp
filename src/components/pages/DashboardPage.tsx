@@ -48,7 +48,7 @@ export function DashboardPage({
         const yesterday = isoDate(new Date(now.getTime() - 86_400_000));
         const weekAgo = isoDate(new Date(now.getTime() - 6 * 86_400_000));
 
-        const [todayRes, yesterdayRes, weekRes, lowStockRes, outstandingRes, paymentsRes] = await Promise.all([
+        const [todayRes, yesterdayRes, weekRes, lowStockRes, outstandingRes, paymentsRes] = await Promise.allSettled([
           apiRequest<{ invoices: Invoice[] }>(`/companies/${session.companyId}/reports/sales?from=${today}&to=${today}`, { token: session.token }),
           apiRequest<{ invoices: Invoice[] }>(`/companies/${session.companyId}/reports/sales?from=${yesterday}&to=${yesterday}`, { token: session.token }),
           apiRequest<{ invoices: Invoice[] }>(`/companies/${session.companyId}/reports/sales?from=${weekAgo}&to=${today}`, { token: session.token }),
@@ -56,12 +56,14 @@ export function DashboardPage({
           apiRequest<{ parties: Party[] }>(`/companies/${session.companyId}/reports/outstanding`, { token: session.token }),
           apiRequest<{ payments: Payment[] }>(`/companies/${session.companyId}/payments`, { token: session.token }),
         ]);
-        setTodaysSales(todayRes.invoices.reduce((s, i) => s + Number(i.total), 0));
-        setYesterdaySales(yesterdayRes.invoices.reduce((s, i) => s + Number(i.total), 0));
-        setWeekSales(weekRes.invoices);
-        setLowStockItems([...lowStockRes.items].sort((a, b) => (Number(b.minStock) - Number(b.stockQty)) - (Number(a.minStock) - Number(a.stockQty))));
-        setOutstandingParties([...outstandingRes.parties].sort((a, b) => Number(b.balance) - Number(a.balance)));
-        setRecentPayments(paymentsRes.payments);
+        const failures = [todayRes, yesterdayRes, weekRes, lowStockRes, outstandingRes, paymentsRes].filter((r) => r.status === 'rejected');
+        if (todayRes.status === 'fulfilled') setTodaysSales(todayRes.value.invoices.reduce((s, i) => s + Number(i.total), 0));
+        if (yesterdayRes.status === 'fulfilled') setYesterdaySales(yesterdayRes.value.invoices.reduce((s, i) => s + Number(i.total), 0));
+        if (weekRes.status === 'fulfilled') setWeekSales(weekRes.value.invoices);
+        if (lowStockRes.status === 'fulfilled') setLowStockItems([...lowStockRes.value.items].sort((a, b) => (Number(b.minStock) - Number(b.stockQty)) - (Number(a.minStock) - Number(a.stockQty))));
+        if (outstandingRes.status === 'fulfilled') setOutstandingParties([...outstandingRes.value.parties].sort((a, b) => Number(b.balance) - Number(a.balance)));
+        if (paymentsRes.status === 'fulfilled') setRecentPayments(paymentsRes.value.payments);
+        setError(failures.length ? 'Some dashboard panels are still loading. They will refresh after the backend is ready.' : null);
       } catch (err) {
         setError(err instanceof ApiError ? err.message : 'Failed to load dashboard');
       } finally {

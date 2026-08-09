@@ -208,6 +208,16 @@ const RECEIPT_SECTION_KEYS = [
 const DEFAULT_RECEIPT_SECTIONS = RECEIPT_SECTION_KEYS.map((key, order) => ({ key, enabled: true, order }));
 
 const receiptSettingsSchema = z.object({
+  shopNameText: z.string().default(''),
+  shopNameFontSize: z.number().min(8).max(32).default(16),
+  localShopNameText: z.string().default(''),
+  localShopNameFontSize: z.number().min(8).max(32).default(16),
+  headerLine1Text: z.string().default(''),
+  headerLine1FontSize: z.number().min(8).max(24).default(12),
+  headerLine2Text: z.string().default(''),
+  headerLine2FontSize: z.number().min(8).max(24).default(10),
+  headerLine3Text: z.string().default(''),
+  headerLine3FontSize: z.number().min(8).max(24).default(10),
   exchangePolicyText: z.string().default('Exchange within 7 days with bill. No exchange on sale items and altered garments.'),
   footerText: z.string().default('Thank you! Visit again'),
   // Round 10 — free-form multi-line custom message / terms & conditions /

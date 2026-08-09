@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  LayoutDashboard, Package, Receipt, ShoppingCart, Users, UserCog, BarChart3, Tag, LogOut, Settings, Menu, PackagePlus, FileText, LayoutTemplate,
+  LayoutDashboard, Package, Receipt, ShoppingCart, Users, UserCog, BarChart3, LogOut, Settings, Menu, PackagePlus, FileText, LayoutTemplate,
   Bell, ClipboardList, Printer, HelpCircle, ChevronDown, ShieldCheck, X, RefreshCw, Download, Minus, Square,
 } from 'lucide-react';
 
@@ -12,7 +12,6 @@ import { InvoicesPage } from './components/pages/InvoicesPage';
 import { PurchasePage } from './components/pages/PurchasePage';
 import { PartiesPage } from './components/pages/PartiesPage';
 import { ReportsPage } from './components/pages/ReportsPage';
-import { LabelsPage } from './components/pages/LabelsPage';
 import { LabelDesignerPage } from './components/pages/LabelDesignerPage';
 import { SettingsPage, type SectionKey } from './components/pages/SettingsPage';
 import { UsersPage } from './components/pages/UsersPage';
@@ -31,7 +30,7 @@ type ChromeStyle = React.CSSProperties & { WebkitAppRegion?: 'drag' | 'no-drag';
 // RULES.md #11: one page = one file, MainApp + PageContent + setActiveTab.
 // RULES.md #1: inline style objects only, no CSS frameworks.
 
-type Tab = 'dashboard' | 'items' | 'bulk-stock' | 'billing' | 'invoices' | 'purchase' | 'parties' | 'reports' | 'labels' | 'label-designer' | 'users' | 'settings';
+type Tab = 'dashboard' | 'items' | 'bulk-stock' | 'billing' | 'invoices' | 'purchase' | 'parties' | 'reports' | 'label-designer' | 'users' | 'settings';
 
 // Round 3: 'users' (Team & Access) is never STAFF-assignable — only
 // ADMIN/SUPER_ADMIN manage accounts/permissions, so it's excluded from
@@ -45,7 +44,6 @@ const NAV: Array<{ tab: Tab; label: string; icon: typeof LayoutDashboard }> = [
   { tab: 'purchase', label: 'Purchase Entry', icon: ShoppingCart },
   { tab: 'parties', label: 'Parties & Ledger', icon: Users },
   { tab: 'reports', label: 'Reports & GST Pack', icon: BarChart3 },
-  { tab: 'labels', label: 'Barcode Labels', icon: Tag },
   { tab: 'label-designer', label: 'Label Designer', icon: LayoutTemplate },
   { tab: 'users', label: 'Team & Access', icon: UserCog },
   { tab: 'settings', label: 'Settings', icon: Settings },
@@ -107,8 +105,6 @@ function PageContent({
       return <PartiesPage initialSelectedPartyId={selectedPartyId} onInitialSelectedHandled={onPartyConsumed} />;
     case 'reports':
       return <ReportsPage />;
-    case 'labels':
-      return <LabelsPage />;
     case 'label-designer':
       return <LabelDesignerPage />;
     case 'users':
@@ -804,14 +800,22 @@ function AppShell() {
 
         <AlertsBell
           open={alertsOpen}
-          onToggle={() => setAlertsOpen((v) => !v)}
+          onToggle={() => {
+            setNotepadOpen(false);
+            setProfileMenuOpen(false);
+            setAlertsOpen((v) => !v);
+          }}
           onClose={() => setAlertsOpen(false)}
           onNavigate={(tab) => { setAlertsOpen(false); setActiveTab(tab); }}
           onNavigateToParty={(partyId) => { setAlertsOpen(false); setSelectedPartyId(partyId); setActiveTab('parties'); }}
         />
 
         <button
-          onClick={() => setNotepadOpen((v) => !v)}
+          onClick={() => {
+            setAlertsOpen(false);
+            setProfileMenuOpen(false);
+            setNotepadOpen((v) => !v);
+          }}
           title="Quick Notepad"
           aria-label="Quick Notepad"
           style={topBarIconBtn(notepadOpen)}
@@ -820,7 +824,12 @@ function AppShell() {
         </button>
 
         <button
-          onClick={() => setPrinterSettingsOpen(true)}
+          onClick={() => {
+            setAlertsOpen(false);
+            setNotepadOpen(false);
+            setProfileMenuOpen(false);
+            setPrinterSettingsOpen(true);
+          }}
           title="Printer Settings"
           aria-label="Printer Settings"
           style={topBarIconBtn(printerSettingsOpen)}
@@ -829,7 +838,7 @@ function AppShell() {
         </button>
 
         <button
-          onClick={() => { setSettingsInitialSection('help'); setActiveTab('settings'); }}
+          onClick={() => { setAlertsOpen(false); setNotepadOpen(false); setProfileMenuOpen(false); setSettingsInitialSection('help'); setActiveTab('settings'); }}
           title="Help & FAQ"
           aria-label="Help and FAQ"
           style={topBarIconBtn(activeTab === 'settings' && settingsInitialSection === 'help')}
@@ -839,7 +848,11 @@ function AppShell() {
 
         <div ref={profileMenuRef} style={{ position: 'relative' }}>
           <button
-            onClick={() => setProfileMenuOpen((v) => !v)}
+            onClick={() => {
+              setAlertsOpen(false);
+              setNotepadOpen(false);
+              setProfileMenuOpen((v) => !v);
+            }}
             style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px 4px 4px',
               border: `1px solid ${color.line}`, borderRadius: 999, background: color.paper, cursor: 'pointer',

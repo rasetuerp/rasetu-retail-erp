@@ -32,7 +32,7 @@ labelsRouter.get(
 const labelElementSchema = z
   .object({
     id: z.string(),
-    type: z.enum(['field', 'text', 'barcode', 'qrcode', 'line', 'rectangle']),
+    type: z.enum(['field', 'text', 'barcode', 'qrcode', 'line', 'rectangle', 'image']),
     xMm: z.number(),
     yMm: z.number(),
     widthMm: z.number(),

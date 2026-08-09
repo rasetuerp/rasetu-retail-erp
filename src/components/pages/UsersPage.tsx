@@ -19,7 +19,7 @@ const ASSIGNABLE_TABS: Array<{ tab: Tab; label: string }> = [
   { tab: 'purchase', label: 'Purchase Entry' },
   { tab: 'parties', label: 'Parties & Ledger' },
   { tab: 'reports', label: 'Reports & GST Pack' },
-  { tab: 'labels', label: 'Barcode Labels' },
+  { tab: 'labels', label: 'Label Designer' },
   { tab: 'settings', label: 'Settings' },
 ];
 

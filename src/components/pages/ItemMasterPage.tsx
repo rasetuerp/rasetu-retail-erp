@@ -678,7 +678,7 @@ function FormSection({ title, children }: { title: string; children: React.React
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontFamily: theme.mono, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.05em', color: color.inkFaint, marginBottom: 8 }}>{title}</div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>{children}</div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>{children}</div>
     </div>
   );
 }

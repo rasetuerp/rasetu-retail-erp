@@ -24,6 +24,16 @@ type PaymentModeEntry = { name: string; isActive: boolean };
 
 const { color } = theme;
 const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
+  shopNameText: '',
+  shopNameFontSize: 16,
+  localShopNameText: '',
+  localShopNameFontSize: 16,
+  headerLine1Text: '',
+  headerLine1FontSize: 12,
+  headerLine2Text: '',
+  headerLine2FontSize: 10,
+  headerLine3Text: '',
+  headerLine3FontSize: 10,
   exchangePolicyText: '',
   footerText: '',
   customMessageText: '',

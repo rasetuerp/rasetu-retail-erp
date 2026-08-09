@@ -547,6 +547,16 @@ function CategoriesCard() {
 // order — a text-only analog of a section catalog, since true drag
 // positioning doesn't apply to a monospace receipt).
 type ReceiptSettings = {
+  shopNameText: string;
+  shopNameFontSize: number;
+  localShopNameText: string;
+  localShopNameFontSize: number;
+  headerLine1Text: string;
+  headerLine1FontSize: number;
+  headerLine2Text: string;
+  headerLine2FontSize: number;
+  headerLine3Text: string;
+  headerLine3FontSize: number;
   exchangePolicyText: string;
   footerText: string;
   customMessageText: string;
@@ -564,6 +574,16 @@ function ReceiptSettingsCard() {
   const [sections, setSections] = useState<ReceiptSectionConfig[]>(DEFAULT_RECEIPT_SECTIONS);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const shopNameRef = useRef<HTMLInputElement>(null);
+  const shopNameFontRef = useRef<HTMLInputElement>(null);
+  const localShopNameRef = useRef<HTMLInputElement>(null);
+  const localShopNameFontRef = useRef<HTMLInputElement>(null);
+  const headerLine1Ref = useRef<HTMLInputElement>(null);
+  const headerLine1FontRef = useRef<HTMLInputElement>(null);
+  const headerLine2Ref = useRef<HTMLTextAreaElement>(null);
+  const headerLine2FontRef = useRef<HTMLInputElement>(null);
+  const headerLine3Ref = useRef<HTMLInputElement>(null);
+  const headerLine3FontRef = useRef<HTMLInputElement>(null);
   const exchangeRef = useRef<HTMLInputElement>(null);
   const footerRef = useRef<HTMLInputElement>(null);
   const customMessageRef = useRef<HTMLTextAreaElement>(null);
@@ -613,6 +633,16 @@ function ReceiptSettingsCard() {
         method: 'PUT',
         token: session.token,
         body: {
+          shopNameText: shopNameRef.current?.value ?? '',
+          shopNameFontSize: Number(shopNameFontRef.current?.value ?? 16),
+          localShopNameText: localShopNameRef.current?.value ?? '',
+          localShopNameFontSize: Number(localShopNameFontRef.current?.value ?? 16),
+          headerLine1Text: headerLine1Ref.current?.value ?? '',
+          headerLine1FontSize: Number(headerLine1FontRef.current?.value ?? 12),
+          headerLine2Text: headerLine2Ref.current?.value ?? '',
+          headerLine2FontSize: Number(headerLine2FontRef.current?.value ?? 10),
+          headerLine3Text: headerLine3Ref.current?.value ?? '',
+          headerLine3FontSize: Number(headerLine3FontRef.current?.value ?? 10),
           exchangePolicyText: exchangeRef.current?.value ?? '',
           footerText: footerRef.current?.value ?? '',
           customMessageText: customMessageRef.current?.value ?? '',
@@ -643,6 +673,65 @@ function ReceiptSettingsCard() {
       {error && <div style={{ background: color.alertTint, color: color.alert, padding: 10, borderRadius: theme.radiusSm, fontSize: 13, marginBottom: 10 }}>{error}</div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: color.paperRaised, border: `1px solid ${color.line}`, borderRadius: theme.radius, padding: 18, boxShadow: theme.shadowSm }}>
+        <div style={groupHeadingStyle}>Receipt Shop Header</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) 90px', gap: 8 }}>
+          <label style={labelStyle}>
+            Shop name override
+            <input ref={shopNameRef} key={settings.shopNameText} defaultValue={settings.shopNameText} placeholder="Uses Shop Profile name if blank" style={inputStyle} />
+          </label>
+          <label style={labelStyle}>
+            Size
+            <input ref={shopNameFontRef} key={`shop-font-${settings.shopNameFontSize}`} type="number" min={8} max={32} defaultValue={settings.shopNameFontSize ?? 16} style={{ ...inputStyle, width: 80 }} />
+          </label>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) 90px', gap: 8 }}>
+          <label style={labelStyle}>
+            Local language shop name
+            <input ref={localShopNameRef} key={settings.localShopNameText} defaultValue={settings.localShopNameText} placeholder="Kannada/local shop name" style={inputStyle} />
+          </label>
+          <label style={labelStyle}>
+            Size
+            <input ref={localShopNameFontRef} key={`local-font-${settings.localShopNameFontSize}`} type="number" min={8} max={32} defaultValue={settings.localShopNameFontSize ?? 16} style={{ ...inputStyle, width: 80 }} />
+          </label>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) 90px', gap: 8 }}>
+          <label style={labelStyle}>
+            Header line 1
+            <input ref={headerLine1Ref} key={settings.headerLine1Text} defaultValue={settings.headerLine1Text} placeholder="Family Show Room" style={inputStyle} />
+          </label>
+          <label style={labelStyle}>
+            Size
+            <input ref={headerLine1FontRef} key={`h1-font-${settings.headerLine1FontSize}`} type="number" min={8} max={24} defaultValue={settings.headerLine1FontSize ?? 12} style={{ ...inputStyle, width: 80 }} />
+          </label>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) 90px', gap: 8 }}>
+          <label style={labelStyle}>
+            Header line 2 / business details
+            <textarea
+              ref={headerLine2Ref}
+              key={settings.headerLine2Text}
+              defaultValue={settings.headerLine2Text}
+              rows={3}
+              placeholder={'Pure Handloom Sarees\nAll types of Sarees Ready-Made Garments\n& Gold Covering Jewellery'}
+              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
+            />
+          </label>
+          <label style={labelStyle}>
+            Size
+            <input ref={headerLine2FontRef} key={`h2-font-${settings.headerLine2FontSize}`} type="number" min={8} max={24} defaultValue={settings.headerLine2FontSize ?? 10} style={{ ...inputStyle, width: 80 }} />
+          </label>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) 90px', gap: 8 }}>
+          <label style={labelStyle}>
+            Header line 3
+            <input ref={headerLine3Ref} key={settings.headerLine3Text} defaultValue={settings.headerLine3Text} placeholder="Optional extra line" style={inputStyle} />
+          </label>
+          <label style={labelStyle}>
+            Size
+            <input ref={headerLine3FontRef} key={`h3-font-${settings.headerLine3FontSize}`} type="number" min={8} max={24} defaultValue={settings.headerLine3FontSize ?? 10} style={{ ...inputStyle, width: 80 }} />
+          </label>
+        </div>
+        <div style={{ borderTop: `1px solid ${color.lineSoft}`, margin: '4px 0' }} />
         <label style={labelStyle}>
           Exchange policy text
           <input ref={exchangeRef} key={settings.exchangePolicyText} defaultValue={settings.exchangePolicyText} style={inputStyle} />

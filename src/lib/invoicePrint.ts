@@ -92,6 +92,16 @@ export const DEFAULT_RECEIPT_SECTIONS: ReceiptSectionConfig[] = (Object.keys(REC
 // Round 6 — shop-configurable text shown on the thermal receipt footer;
 // mirrors backend/src/routes/invoices.ts's receiptSettingsSchema defaults.
 export type ReceiptSettings = {
+  shopNameText: string;
+  shopNameFontSize: number;
+  localShopNameText: string;
+  localShopNameFontSize: number;
+  headerLine1Text: string;
+  headerLine1FontSize: number;
+  headerLine2Text: string;
+  headerLine2FontSize: number;
+  headerLine3Text: string;
+  headerLine3FontSize: number;
   exchangePolicyText: string;
   footerText: string;
   customMessageText: string;
@@ -103,6 +113,16 @@ export type ReceiptSettings = {
   marginRightChars: number;
 };
 const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
+  shopNameText: '',
+  shopNameFontSize: 16,
+  localShopNameText: '',
+  localShopNameFontSize: 16,
+  headerLine1Text: '',
+  headerLine1FontSize: 12,
+  headerLine2Text: '',
+  headerLine2FontSize: 10,
+  headerLine3Text: '',
+  headerLine3FontSize: 10,
   exchangePolicyText: 'Exchange within 7 days with bill. No exchange on sale items and altered garments.',
   footerText: 'Thank you! Visit again',
   // Round 10 — free-form, multi-line (unlike exchangePolicyText/footerText):
@@ -256,11 +276,26 @@ function receiptCenter(s: string, width: number): string {
   return ' '.repeat(pad) + s;
 }
 
+function receiptHeaderText(text: string, fontSize: number): string {
+  const clean = text.trim();
+  if (!clean) return '';
+  return fontSize >= 15 ? clean.toUpperCase() : clean;
+}
+
 function sectionHeader(inv: PrintableInvoice, settings: ReceiptSettings): string[] {
   const company = inv.company;
   const w = settings.columns;
   const lines: string[] = [];
-  lines.push(receiptCenter(company?.name ?? 'RaSetu Retail', w));
+  const shopName = receiptHeaderText(settings.shopNameText || company?.name || 'RaSetu Retail', settings.shopNameFontSize);
+  const localShopName = receiptHeaderText(settings.localShopNameText, settings.localShopNameFontSize);
+  const customHeaderLines = [
+    receiptHeaderText(settings.headerLine1Text, settings.headerLine1FontSize),
+    receiptHeaderText(settings.headerLine2Text, settings.headerLine2FontSize),
+    receiptHeaderText(settings.headerLine3Text, settings.headerLine3FontSize),
+  ].filter(Boolean);
+  lines.push(receiptCenter(shopName, w));
+  if (localShopName) lines.push(receiptCenter(localShopName, w));
+  customHeaderLines.forEach((line) => lines.push(...line.split('\n').filter(Boolean).map((part) => receiptCenter(part, w))));
   if (company?.address) lines.push(receiptCenter(company.address, w));
   if (company?.phone) lines.push(receiptCenter(`Ph: ${company.phone}`, w));
   if (company?.gstin) lines.push(receiptCenter(`GSTIN: ${company.gstin}`, w));
@@ -563,7 +598,15 @@ export function buildA4Html(inv: PrintableInvoice, layout: A4Layout, settings?: 
     .join('');
 
   const pageSize = layout === 'a4' ? '210mm 297mm' : '210mm 148mm';
-  const shopName = company?.name ?? 'Shop name not set';
+  const shopName = settings?.shopNameText || company?.name || 'Shop name not set';
+  const headerLines = [
+    settings?.localShopNameText,
+    settings?.headerLine1Text,
+    settings?.headerLine2Text,
+    settings?.headerLine3Text,
+  ]
+    .filter(Boolean)
+    .flatMap((line) => String(line).split('\n').filter(Boolean));
 
   return `
     <html>
@@ -610,6 +653,7 @@ export function buildA4Html(inv: PrintableInvoice, layout: A4Layout, settings?: 
           <div>
             <p class="shop-name">${escapeHtml(shopName)}</p>
             <div class="shop-meta">
+              ${headerLines.map((line) => `${escapeHtml(line)}<br/>`).join('')}
               ${company?.address ? `${escapeHtml(company.address)}<br/>` : ''}
               ${company?.phone ? `Ph: ${escapeHtml(company.phone)}` : ''}${company?.phone && company?.gstin ? ' &nbsp;|&nbsp; ' : ''}${company?.gstin ? `GSTIN: ${escapeHtml(company.gstin)}` : ''}
             </div>
