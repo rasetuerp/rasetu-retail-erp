@@ -4,6 +4,7 @@ import { apiRequest, ApiError } from '../../lib/api';
 import { useSession, type Session, type SessionUser } from '../../lib/session';
 import { theme } from '../../lib/theme';
 import { requestPasswordReset, PasswordResetError } from '../../lib/passwordReset';
+import { BRAND_LOGO_DARK } from '../../lib/assets';
 
 // RULES.md #2: types declared inline, no cross-page imports (api.ts/session.ts/
 // theme.ts are shared infrastructure, same exemption as exportUtils.ts).
@@ -626,9 +627,9 @@ export function SetupWizardPage() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: color.paper, fontFamily: 'Segoe UI, system-ui, sans-serif' }}>
+    <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', background: color.paper, fontFamily: 'Segoe UI, system-ui, sans-serif' }}>
       <div style={cardStyle}>
-        <img src="/branding/rasetu-logo-full-dark.png" alt="RaSetu" style={{ height: 40, marginBottom: 4, display: 'block' }} />
+        <img src={BRAND_LOGO_DARK} alt="RaSetu" style={{ height: 40, marginBottom: 4, display: 'block' }} />
         <div style={{ fontSize: 10, color: '#5C6B78', marginBottom: 10 }}>A brand of Ratan Business Solutions</div>
 
         {error && <div style={{ background: color.alertTint, color: color.alert, padding: 10, borderRadius: theme.radiusSm, fontSize: 13, margin: '12px 0' }}>{error}</div>}

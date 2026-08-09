@@ -111,6 +111,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
+    frame: false,
     // Packaged builds get their icon from electron-builder's win.icon
     // (embedded in the .exe); dev mode needs it set explicitly here or the
     // unpackaged window shows Electron's default icon instead of RaSetu's.

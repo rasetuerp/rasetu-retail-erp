@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   LayoutDashboard, Package, Receipt, ShoppingCart, Users, UserCog, BarChart3, Tag, LogOut, Settings, Menu, PackagePlus, FileText, LayoutTemplate,
-  Bell, ClipboardList, Printer, HelpCircle, ChevronDown, ShieldCheck, X, RefreshCw, Download,
+  Bell, ClipboardList, Printer, HelpCircle, ChevronDown, ShieldCheck, X, RefreshCw, Download, Minus, Square,
 } from 'lucide-react';
 
 import { DashboardPage } from './components/pages/DashboardPage';
@@ -23,8 +23,10 @@ import { activateLicense, getStartupLicenseStatus, revalidateLicenseInBackground
 import { theme } from './lib/theme';
 import type { PrinterConfig, ThermalLayout, A4Layout } from './lib/rasetu-bridge';
 import type { ReceiptSettings } from './lib/invoicePrint';
+import { BRAND_LOGO_DARK } from './lib/assets';
 
 const { color } = theme;
+type ChromeStyle = React.CSSProperties & { WebkitAppRegion?: 'drag' | 'no-drag'; WebkitUserSelect?: 'none' };
 
 // RULES.md #11: one page = one file, MainApp + PageContent + setActiveTab.
 // RULES.md #1: inline style objects only, no CSS frameworks.
@@ -189,9 +191,9 @@ function LicenseGate({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: color.paper, fontFamily: 'Segoe UI, system-ui, sans-serif' }}>
+    <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', background: color.paper, fontFamily: 'Segoe UI, system-ui, sans-serif' }}>
       <div style={{ width: 380, background: color.paperRaised, border: `1px solid ${color.line}`, borderRadius: theme.radius, padding: 28, boxShadow: theme.shadow }}>
-        <img src="/branding/rasetu-logo-full-dark.png" alt="RaSetu" style={{ height: 34, marginBottom: 4, display: 'block' }} />
+        <img src={BRAND_LOGO_DARK} alt="RaSetu" style={{ height: 34, marginBottom: 4, display: 'block' }} />
         <div style={{ fontSize: 10, color: '#5C6B78', marginBottom: 16 }}>A brand of Ratan Business Solutions</div>
         <p style={{ color: color.inkFaint, fontSize: 13, marginBottom: 18 }}>Enter your license key to continue.</p>
         {error && <div style={{ background: color.alertTint, color: color.alert, padding: 10, borderRadius: theme.radiusSm, fontSize: 13, marginBottom: 12 }}>{error}</div>}
@@ -719,9 +721,9 @@ function AppShell() {
 
   if (driveDisconnectedMessage) {
     return (
-      <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: color.paper, fontFamily: 'Segoe UI, system-ui, sans-serif' }}>
+      <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', background: color.paper, fontFamily: 'Segoe UI, system-ui, sans-serif' }}>
         <div style={{ width: 380, background: color.paperRaised, border: `1px solid ${color.line}`, borderRadius: theme.radius, padding: 28, boxShadow: theme.shadow, textAlign: 'center' }}>
-          <img src="/branding/rasetu-logo-full-dark.png" alt="RaSetu" style={{ height: 34, marginBottom: 12, display: 'block', marginLeft: 'auto', marginRight: 'auto' }} />
+          <img src={BRAND_LOGO_DARK} alt="RaSetu" style={{ height: 34, marginBottom: 12, display: 'block', marginLeft: 'auto', marginRight: 'auto' }} />
           <p style={{ color: color.alert, fontSize: 13.5, fontWeight: 600, marginBottom: 8 }}>Drive disconnected</p>
           <p style={{ color: color.inkFaint, fontSize: 13, marginBottom: 18 }}>{driveDisconnectedMessage}</p>
           <button
@@ -739,7 +741,7 @@ function AppShell() {
   const sidebarWidth = sidebarCollapsed ? 64 : 240;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', fontFamily: 'Segoe UI, system-ui, sans-serif' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: 'Segoe UI, system-ui, sans-serif' }}>
       {/* Top bar — full width, sits above the sidebar+content row (GoBilling's
           layout pattern: branding + the sidebar collapse toggle live here,
           not inside the sidebar itself). */}
@@ -763,7 +765,7 @@ function AppShell() {
         >
           <Menu size={19} />
         </button>
-        <img src="/branding/rasetu-logo-full-dark.png" alt="RaSetu" style={{ height: 26, display: 'block' }} />
+        <img src={BRAND_LOGO_DARK} alt="RaSetu" style={{ height: 26, display: 'block' }} />
         <div style={{ flex: 1 }} />
 
         <AlertsBell
@@ -938,10 +940,86 @@ function AppShell() {
   );
 }
 
+function DesktopChrome({ children }: { children: React.ReactNode }) {
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  useEffect(() => {
+    if (!window.rasetu) return;
+    void window.rasetu.windowControls.getState().then((state) => setIsMaximized(state.isMaximized)).catch(() => {});
+  }, []);
+
+  async function toggleMaximize() {
+    if (!window.rasetu) return;
+    await window.rasetu.windowControls.toggleMaximize();
+    const state = await window.rasetu.windowControls.getState();
+    setIsMaximized(state.isMaximized);
+  }
+
+  const canControlWindow = Boolean(window.rasetu);
+
+  return (
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: color.paper }}>
+      <div
+        style={{
+          height: 32,
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          background: '#F7F2EE',
+          borderBottom: `1px solid ${color.line}`,
+          color: color.inkSoft,
+          fontFamily: 'Segoe UI, system-ui, sans-serif',
+          ...dragRegion,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 10, minWidth: 0 }}>
+          <img src={BRAND_LOGO_DARK} alt="" style={{ height: 18, maxWidth: 86, objectFit: 'contain', display: 'block' }} />
+          <span style={{ fontSize: 12.5, color: color.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>RaSetu Retail ERP</span>
+        </div>
+        <div style={{ flex: 1 }} />
+        {canControlWindow && (
+          <div style={{ display: 'flex', height: '100%', ...noDragRegion }}>
+            <button onClick={() => void window.rasetu?.windowControls.minimize()} title="Minimize" aria-label="Minimize" style={windowButton}>
+              <Minus size={15} />
+            </button>
+            <button onClick={() => void toggleMaximize()} title={isMaximized ? 'Restore' : 'Maximize'} aria-label={isMaximized ? 'Restore' : 'Maximize'} style={windowButton}>
+              <Square size={13} />
+            </button>
+            <button onClick={() => void window.rasetu?.windowControls.close()} title="Close" aria-label="Close" style={{ ...windowButton, width: 46 }}>
+              <X size={16} />
+            </button>
+          </div>
+        )}
+      </div>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const dragRegion: ChromeStyle = { WebkitAppRegion: 'drag', WebkitUserSelect: 'none' };
+const noDragRegion: ChromeStyle = { WebkitAppRegion: 'no-drag' };
+const windowButton: ChromeStyle = {
+  width: 42,
+  height: '100%',
+  border: 'none',
+  background: 'transparent',
+  color: color.inkSoft,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  cursor: 'pointer',
+  padding: 0,
+  ...noDragRegion,
+};
+
 export function App() {
   return (
-    <LicenseGate>
-      <AppShell />
-    </LicenseGate>
+    <DesktopChrome>
+      <LicenseGate>
+        <AppShell />
+      </LicenseGate>
+    </DesktopChrome>
   );
 }
