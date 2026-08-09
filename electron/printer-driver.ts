@@ -153,6 +153,25 @@ function fontForSize(sizePt = 10): string {
   return '4';
 }
 
+function estimateBarcodeModules(value: string, type: LabelElement['barcodeType'] = 'code128'): number {
+  const contentLength = Math.max(1, value.length);
+  switch (type) {
+    case 'ean13':
+    case 'upca':
+      return 95;
+    case 'code39':
+      return contentLength * 13 + 25;
+    case 'code128':
+    default:
+      return (contentLength + 3) * 11 + 2;
+  }
+}
+
+function barcodeNarrowWidth(widthMm: number, value: string, type: LabelElement['barcodeType'] | undefined, dpi: number): number {
+  const targetDots = Math.max(1, mmToDots(widthMm, dpi));
+  return clamp(Math.floor(targetDots / estimateBarcodeModules(value, type ?? 'code128')), 1, 10);
+}
+
 function rotationForOrientation(orientation: PrinterSettings['orientation']): 0 | 90 | 180 | 270 {
   switch (orientation) {
     case 'landscape':
@@ -271,8 +290,7 @@ export class TscPrinterDriver {
         if (!content) continue;
 
         const font = fontForSize(element.fontSize);
-        const scale = element.fontWeight === 'bold' ? 2 : 1;
-        lines.push(`TEXT ${x},${y},"${font}",${transformed.rotation},${scale},${scale},"${content}"`);
+        lines.push(`TEXT ${x},${y},"${font}",${transformed.rotation},1,1,"${content}"`);
         continue;
       }
 
@@ -280,8 +298,11 @@ export class TscPrinterDriver {
         const content = tsplQuote(resolveContent(element, data));
         if (!content) continue;
 
+        const rawContent = resolveContent(element, data);
         const heightDots = Math.max(24, mmToDots(element.height || 10, this.profile.dpi));
-        lines.push(`BARCODE ${x},${y},"${barcodeTypeToTspl(element.barcodeType)}",${heightDots},1,${transformed.rotation},2,2,"${content}"`);
+        const narrow = barcodeNarrowWidth(element.width || 30, rawContent, element.barcodeType, this.profile.dpi);
+        const wide = clamp(narrow * 2, narrow, 10);
+        lines.push(`BARCODE ${x},${y},"${barcodeTypeToTspl(element.barcodeType)}",${heightDots},1,${transformed.rotation},${narrow},${wide},"${content}"`);
         continue;
       }
 

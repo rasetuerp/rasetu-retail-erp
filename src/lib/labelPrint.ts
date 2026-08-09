@@ -149,6 +149,39 @@ export function resolveFieldValue(sourceKey: string, item: LabelPrintItem | null
 // already been brought into sync with each other. `customAttrs` is the same
 // `{ key, label }` shape ItemMasterPage.tsx/BulkStockEntryPage.tsx already
 // fetch from GET /companies/:id/items/fields (filtered to `custom: true`).
+export function tsplFontPreviewPx(sizePt = 10): number {
+  if (sizePt <= 8) return 6;
+  if (sizePt <= 10) return 10;
+  if (sizePt <= 14) return 12;
+  return 16;
+}
+
+export function estimateBarcodeModules(value: string, type: DesignElement['barcodeType'] = 'code128'): number {
+  const contentLength = Math.max(1, value.length);
+  switch (type) {
+    case 'ean13':
+    case 'upca':
+      return 95;
+    case 'code39':
+      return contentLength * 13 + 25;
+    case 'code128':
+    default:
+      return (contentLength + 3) * 11 + 2;
+  }
+}
+
+export function barcodePreviewModulePx(
+  widthMm: number,
+  value: string,
+  type: DesignElement['barcodeType'] = 'code128',
+  pxPerMm = 4,
+  dpi = 203
+): number {
+  const targetDots = Math.max(1, Math.round((Math.max(0.1, widthMm) / 25.4) * dpi));
+  const narrowDots = Math.max(1, Math.floor(targetDots / estimateBarcodeModules(value, type)));
+  return (narrowDots / dpi) * 25.4 * pxPerMm;
+}
+
 export function buildFieldOptions(customAttrs: Array<{ key: string; label: string }> = []): Array<{ key: string; label: string }> {
   if (customAttrs.length === 0) return FIELD_OPTIONS;
   return [...FIELD_OPTIONS, ...customAttrs.map((a) => ({ key: `itemCustom.${a.key}`, label: a.label }))];

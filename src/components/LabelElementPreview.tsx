@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import JsBarcode from 'jsbarcode';
 import QRCode from 'qrcode';
-import { resolveFieldValue, type DesignElement, type LabelPrintItem, type LabelPrintCompany } from '../lib/labelPrint';
+import { barcodePreviewModulePx, resolveFieldValue, type DesignElement, type LabelPrintItem, type LabelPrintCompany } from '../lib/labelPrint';
 
 // Round 20 — replaces the old `|||value|||` / `'QR'` text placeholders that
 // both LabelDesignerPage.tsx and LabelsPage.tsx used to render for barcode/
@@ -39,7 +39,7 @@ export function LabelElementPreview({
   }
   if (el.type === 'barcode' || el.type === 'qrcode') {
     const value = el.sourceKey ? resolveFieldValue(el.sourceKey, item, company) : (el.content ?? '');
-    return <CodePreview type={el.type} value={value} barcodeType={el.barcodeType} />;
+    return <CodePreview el={el} type={el.type} value={value} barcodeType={el.barcodeType} />;
   }
   if (el.type === 'image') {
     return el.content ? (
@@ -52,7 +52,17 @@ export function LabelElementPreview({
   return null;
 }
 
-function CodePreview({ type, value, barcodeType }: { type: 'barcode' | 'qrcode'; value: string; barcodeType?: DesignElement['barcodeType'] }) {
+function CodePreview({
+  el,
+  type,
+  value,
+  barcodeType,
+}: {
+  el: DesignElement;
+  type: 'barcode' | 'qrcode';
+  value: string;
+  barcodeType?: DesignElement['barcodeType'];
+}) {
   // A plain DOM container manipulated imperatively (JsBarcode/qrcode both
   // want a real element to draw into) — kept in a SEPARATE node from the
   // React-rendered placeholder/error text below, and always mounted
@@ -74,22 +84,24 @@ function CodePreview({ type, value, barcodeType }: { type: 'barcode' | 'qrcode';
     if (type === 'barcode') {
       try {
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        const modulePx = barcodePreviewModulePx(el.widthMm, value, barcodeType ?? 'code128');
+        const barcodeHeightPx = Math.max(8, Math.round(el.heightMm * 4) - 10);
         JsBarcode(svg, value, {
           format: BARCODE_FORMAT[barcodeType ?? 'code128'],
           displayValue: true,
-          margin: 2,
-          height: 40,
-          fontSize: 12,
+          margin: 0,
+          width: modulePx,
+          height: barcodeHeightPx,
+          fontSize: 8,
         });
-        // JsBarcode sizes the SVG to its own intrinsic pixel dimensions —
-        // capture those as a viewBox, then stretch width/height to 100% so
-        // it fills whatever box the caller positioned it in.
+        // Keep barcode width module-based like TSPL. Stretching it to the
+        // whole design box made the preview hide real printer fit problems.
         const w = svg.getAttribute('width');
         const h = svg.getAttribute('height');
         if (w && h) svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-        svg.setAttribute('width', '100%');
+        svg.setAttribute('width', String(Number(w) || el.widthMm * 4));
         svg.setAttribute('height', '100%');
-        svg.setAttribute('preserveAspectRatio', 'none');
+        svg.setAttribute('preserveAspectRatio', 'xMinYMid meet');
         container.appendChild(svg);
       } catch {
         // Non-numeric/wrong-length value for a checksummed format like
@@ -113,7 +125,7 @@ function CodePreview({ type, value, barcodeType }: { type: 'barcode' | 'qrcode';
     return () => {
       cancelled = true;
     };
-  }, [type, value, barcodeType]);
+  }, [type, value, barcodeType, el.heightMm, el.widthMm]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>

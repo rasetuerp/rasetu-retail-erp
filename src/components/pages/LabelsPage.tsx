@@ -3,7 +3,7 @@ import { apiRequest, ApiError } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { theme } from '../../lib/theme';
 import { LabelElementPreview } from '../LabelElementPreview';
-import { buildPrinterTemplate, buildDataForItem, type LabelTemplateDto, type LabelPrintItem as Item, type LabelPrintCompany } from '../../lib/labelPrint';
+import { buildPrinterTemplate, buildDataForItem, tsplFontPreviewPx, type LabelTemplateDto, type LabelPrintItem as Item, type LabelPrintCompany } from '../../lib/labelPrint';
 
 // RULES.md #2: types declared inline (shared shapes in src/lib/labelPrint.ts).
 // Round 7 — this page is now the day-to-day "print labels for these items"
@@ -148,7 +148,7 @@ export function LabelsPage() {
                         position: 'absolute', left: el.xMm * ZOOM, top: el.yMm * ZOOM, width: el.widthMm * ZOOM, height: el.heightMm * ZOOM,
                         display: 'flex', alignItems: 'center', justifyContent: el.align === 'center' ? 'center' : el.align === 'right' ? 'flex-end' : 'flex-start',
                         overflow: 'hidden', background: el.type === 'line' || el.type === 'rectangle' ? color.ink : 'transparent',
-                        fontSize: el.type === 'text' ? (el.fontSize ?? 8) * 1.1 : 8, fontWeight: el.bold ? 700 : 400,
+                        fontSize: el.type === 'text' ? tsplFontPreviewPx(el.fontSize) : 8, fontWeight: el.bold ? 700 : 400,
                         color: color.ink, whiteSpace: el.type === 'text' ? 'nowrap' : undefined,
                       }}
                     >
