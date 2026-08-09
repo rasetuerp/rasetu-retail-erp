@@ -426,7 +426,7 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
 
   const numLabel = (key: keyof PrinterConfig['label'], fallback = 0) => Number(config?.label[key] ?? fallback);
 
-  function patchReceiptPaper(value: Partial<Pick<ReceiptSettings, 'columns' | 'marginLeftChars' | 'marginRightChars'>>) {
+  function patchReceiptPaper(value: Partial<Pick<ReceiptSettings, 'columns' | 'marginLeftChars' | 'marginRightChars' | 'endFeedLines'>>) {
     setReceiptSettings((prev) => (prev ? { ...prev, ...value } : prev));
   }
 
@@ -526,8 +526,8 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
                   <label style={pdLabelFull}>
                     Paper width
                     <select value={receiptSettings.columns} onChange={(e) => patchReceiptPaper({ columns: Number(e.target.value) })} style={pdSelect}>
-                      <option value={32}>58mm / 2 inch roll (32 columns)</option>
-                      <option value={48}>80mm / 3 inch roll (48 columns)</option>
+                      <option value={32}>58mm / 2 inch roll - 32 columns</option>
+                      <option value={48}>80mm / 3 inch roll - 48 columns</option>
                     </select>
                   </label>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -538,6 +538,10 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
                     <label style={pdLabel}>
                       Right margin (chars)
                       <input type="number" min={0} max={12} value={receiptSettings.marginRightChars ?? 0} onChange={(e) => patchReceiptPaper({ marginRightChars: Number(e.target.value) || 0 })} style={pdInput} />
+                    </label>
+                    <label style={pdLabel}>
+                      End feed lines
+                      <input type="number" min={0} max={5} value={receiptSettings.endFeedLines ?? 0} onChange={(e) => patchReceiptPaper({ endFeedLines: Number(e.target.value) || 0 })} style={pdInput} />
                     </label>
                   </div>
                 </>
@@ -630,6 +634,7 @@ function buildReceiptCalibrationText(settings: ReceiptSettings): string {
   const columns = Math.max(20, Math.min(64, Number(settings.columns) || 32));
   const left = Math.max(0, Math.min(12, Number(settings.marginLeftChars) || 0));
   const right = Math.max(0, Math.min(12, Number(settings.marginRightChars) || 0));
+  const feed = Math.max(0, Math.min(5, Number(settings.endFeedLines) || 0));
   const contentWidth = Math.max(8, columns - left - right);
   const pad = ' '.repeat(left);
   const line = '-'.repeat(contentWidth);
@@ -642,13 +647,13 @@ function buildReceiptCalibrationText(settings: ReceiptSettings): string {
     pad + line,
     pad + `Paper: ${columns === 48 ? '80mm / 3 inch' : '58mm / 2 inch'}`.slice(0, contentWidth),
     pad + `Width: ${columns} cols  L:${left} R:${right}`.slice(0, contentWidth),
+    pad + `End feed lines: ${feed}`.slice(0, contentWidth),
     pad + ruler,
     pad + line,
     pad + 'LEFT'.padEnd(contentWidth - 5, ' ') + 'RIGHT',
     pad + center('CENTER CHECK'),
     pad + line,
-    '',
-    '',
+    ...Array.from({ length: feed }, () => ''),
   ].join('\n');
 }
 

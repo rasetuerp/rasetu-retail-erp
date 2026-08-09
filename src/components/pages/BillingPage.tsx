@@ -193,6 +193,7 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
     headerLine2FontSize: 10,
     headerLine3Text: '',
     headerLine3FontSize: 10,
+    headerOrder: ['shopName', 'localShopName', 'headerLine1', 'headerLine2', 'headerLine3'],
     exchangePolicyText: '',
     footerText: '',
     customMessageText: '',
@@ -202,6 +203,7 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
     columns: 32,
     marginLeftChars: 0,
     marginRightChars: 0,
+    endFeedLines: 0,
   });
   const [a4Layout, setA4Layout] = useState<A4Layout>('a4');
   const [printStatus, setPrintStatus] = useState<string | null>(null);

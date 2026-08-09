@@ -25,11 +25,45 @@ export function imageToThermalBitmap(dataUrl: string, widthMm: number, heightMm:
         return;
       }
 
-      ctx.clearRect(0, 0, widthDots, heightDots);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, widthDots, heightDots);
       ctx.drawImage(img, 0, 0, widthDots, heightDots);
       const pixels = ctx.getImageData(0, 0, widthDots, heightDots).data;
       const bytesPerRow = Math.ceil(widthDots / 8);
       const bytes: number[] = [];
+      const background = estimateCornerBackground(pixels, widthDots, heightDots);
+      const stripBackground = background ? colorDistance(background, [255, 255, 255]) > 70 : false;
+      const gray = new Float32Array(widthDots * heightDots);
+
+      for (let y = 0; y < heightDots; y++) {
+        for (let x = 0; x < widthDots; x++) {
+          const idx = (y * widthDots + x) * 4;
+          const alpha = pixels[idx + 3];
+          const rgb: [number, number, number] = [pixels[idx], pixels[idx + 1], pixels[idx + 2]];
+          if (alpha < 50 || (stripBackground && background && colorDistance(background, rgb) < 95)) {
+            gray[y * widthDots + x] = 255;
+            continue;
+          }
+          const luminance = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+          gray[y * widthDots + x] = clampByte((luminance - 128) * 1.25 + 128);
+        }
+      }
+
+      for (let y = 0; y < heightDots; y++) {
+        for (let x = 0; x < widthDots; x++) {
+          const idx = y * widthDots + x;
+          const old = gray[idx];
+          const next = old < 168 ? 0 : 255;
+          const error = old - next;
+          gray[idx] = next;
+          distributeDitherError(gray, widthDots, heightDots, x + 1, y, error * 7 / 16);
+          distributeDitherError(gray, widthDots, heightDots, x - 1, y + 1, error * 3 / 16);
+          distributeDitherError(gray, widthDots, heightDots, x, y + 1, error * 5 / 16);
+          distributeDitherError(gray, widthDots, heightDots, x + 1, y + 1, error * 1 / 16);
+        }
+      }
 
       for (let y = 0; y < heightDots; y++) {
         for (let bx = 0; bx < bytesPerRow; bx++) {
@@ -37,10 +71,7 @@ export function imageToThermalBitmap(dataUrl: string, widthMm: number, heightMm:
           for (let bit = 0; bit < 8; bit++) {
             const x = bx * 8 + bit;
             if (x >= widthDots) continue;
-            const idx = (y * widthDots + x) * 4;
-            const alpha = pixels[idx + 3];
-            const luminance = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
-            if (alpha > 50 && luminance < 210) value |= 0x80 >> bit;
+            if (gray[y * widthDots + x] === 0) value |= 0x80 >> bit;
           }
           bytes.push(value);
         }
@@ -56,6 +87,43 @@ export function imageToThermalBitmap(dataUrl: string, widthMm: number, heightMm:
     img.onerror = () => reject(new Error('Could not load image for thermal printing.'));
     img.src = dataUrl;
   });
+}
+
+function clampByte(value: number): number {
+  return Math.max(0, Math.min(255, value));
+}
+
+function distributeDitherError(gray: Float32Array, width: number, height: number, x: number, y: number, error: number): void {
+  if (x < 0 || y < 0 || x >= width || y >= height) return;
+  const idx = y * width + x;
+  gray[idx] = clampByte(gray[idx] + error);
+}
+
+function colorDistance(a: [number, number, number], b: [number, number, number]): number {
+  return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2);
+}
+
+function estimateCornerBackground(pixels: Uint8ClampedArray, width: number, height: number): [number, number, number] | null {
+  const samples: Array<[number, number, number]> = [];
+  const radius = Math.max(2, Math.min(8, Math.floor(Math.min(width, height) / 12)));
+  const corners = [
+    [0, 0],
+    [width - radius, 0],
+    [0, height - radius],
+    [width - radius, height - radius],
+  ];
+  for (const [startX, startY] of corners) {
+    for (let y = startY; y < Math.min(height, startY + radius); y++) {
+      for (let x = startX; x < Math.min(width, startX + radius); x++) {
+        const idx = (y * width + x) * 4;
+        if (pixels[idx + 3] < 50) continue;
+        samples.push([pixels[idx], pixels[idx + 1], pixels[idx + 2]]);
+      }
+    }
+  }
+  if (!samples.length) return null;
+  const totals = samples.reduce<[number, number, number]>((sum, rgb) => [sum[0] + rgb[0], sum[1] + rgb[1], sum[2] + rgb[2]], [0, 0, 0]);
+  return [totals[0] / samples.length, totals[1] / samples.length, totals[2] / samples.length];
 }
 
 const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];

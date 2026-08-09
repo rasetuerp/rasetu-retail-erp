@@ -102,6 +102,7 @@ export type ReceiptSettings = {
   headerLine2FontSize: number;
   headerLine3Text: string;
   headerLine3FontSize: number;
+  headerOrder: ReceiptHeaderKey[];
   exchangePolicyText: string;
   footerText: string;
   customMessageText: string;
@@ -111,7 +112,19 @@ export type ReceiptSettings = {
   columns: number;
   marginLeftChars: number;
   marginRightChars: number;
+  endFeedLines: number;
 };
+
+export type ReceiptHeaderKey = 'shopName' | 'localShopName' | 'headerLine1' | 'headerLine2' | 'headerLine3';
+export const RECEIPT_HEADER_LABELS: Record<ReceiptHeaderKey, string> = {
+  shopName: 'Shop name',
+  localShopName: 'Local language shop name',
+  headerLine1: 'Header line 1',
+  headerLine2: 'Business details',
+  headerLine3: 'Header line 3',
+};
+export const DEFAULT_RECEIPT_HEADER_ORDER: ReceiptHeaderKey[] = ['shopName', 'localShopName', 'headerLine1', 'headerLine2', 'headerLine3'];
+
 const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
   shopNameText: '',
   shopNameFontSize: 16,
@@ -123,6 +136,7 @@ const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
   headerLine2FontSize: 10,
   headerLine3Text: '',
   headerLine3FontSize: 10,
+  headerOrder: DEFAULT_RECEIPT_HEADER_ORDER,
   exchangePolicyText: 'Exchange within 7 days with bill. No exchange on sale items and altered garments.',
   footerText: 'Thank you! Visit again',
   // Round 10 — free-form, multi-line (unlike exchangePolicyText/footerText):
@@ -139,6 +153,7 @@ const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
   columns: 32,
   marginLeftChars: 0,
   marginRightChars: 0,
+  endFeedLines: 0,
 };
 
 function money(v: string | number): string {
@@ -282,20 +297,28 @@ function receiptHeaderText(text: string, fontSize: number): string {
   return fontSize >= 15 ? clean.toUpperCase() : clean;
 }
 
+function orderedReceiptHeaderKeys(settings: ReceiptSettings): ReceiptHeaderKey[] {
+  const saved = Array.isArray(settings.headerOrder) ? settings.headerOrder : [];
+  const valid = saved.filter((key): key is ReceiptHeaderKey => key in RECEIPT_HEADER_LABELS);
+  return [...valid, ...DEFAULT_RECEIPT_HEADER_ORDER.filter((key) => !valid.includes(key))];
+}
+
 function sectionHeader(inv: PrintableInvoice, settings: ReceiptSettings): string[] {
   const company = inv.company;
   const w = settings.columns;
   const lines: string[] = [];
-  const shopName = receiptHeaderText(settings.shopNameText || company?.name || 'RaSetu Retail', settings.shopNameFontSize);
-  const localShopName = receiptHeaderText(settings.localShopNameText, settings.localShopNameFontSize);
-  const customHeaderLines = [
-    receiptHeaderText(settings.headerLine1Text, settings.headerLine1FontSize),
-    receiptHeaderText(settings.headerLine2Text, settings.headerLine2FontSize),
-    receiptHeaderText(settings.headerLine3Text, settings.headerLine3FontSize),
-  ].filter(Boolean);
-  lines.push(receiptCenter(shopName, w));
-  if (localShopName) lines.push(receiptCenter(localShopName, w));
-  customHeaderLines.forEach((line) => lines.push(...line.split('\n').filter(Boolean).map((part) => receiptCenter(part, w))));
+  const headerText: Record<ReceiptHeaderKey, string> = {
+    shopName: receiptHeaderText(settings.shopNameText || company?.name || 'RaSetu Retail', settings.shopNameFontSize),
+    localShopName: receiptHeaderText(settings.localShopNameText, settings.localShopNameFontSize),
+    headerLine1: receiptHeaderText(settings.headerLine1Text, settings.headerLine1FontSize),
+    headerLine2: receiptHeaderText(settings.headerLine2Text, settings.headerLine2FontSize),
+    headerLine3: receiptHeaderText(settings.headerLine3Text, settings.headerLine3FontSize),
+  };
+  orderedReceiptHeaderKeys(settings).forEach((key) => {
+    const text = headerText[key];
+    if (!text) return;
+    lines.push(...text.split('\n').filter(Boolean).map((part) => receiptCenter(part, w)));
+  });
   if (company?.address) lines.push(receiptCenter(company.address, w));
   if (company?.phone) lines.push(receiptCenter(`Ph: ${company.phone}`, w));
   if (company?.gstin) lines.push(receiptCenter(`GSTIN: ${company.gstin}`, w));
@@ -521,11 +544,13 @@ function applyReceiptPaper(raw: string, settings: ReceiptSettings): string {
   const left = Math.max(0, Math.floor(settings.marginLeftChars ?? 0));
   const prefix = ' '.repeat(left);
   const width = receiptContentColumns(settings);
-  return raw
+  const feedLines = Math.max(0, Math.min(5, Math.floor(settings.endFeedLines ?? 0)));
+  const printed = raw
     .split('\n')
     .flatMap((line) => (line ? wrapReceiptLine(line, width) : ['']))
     .map((line) => (line ? prefix + line : ''))
     .join('\n');
+  return feedLines ? `${printed}${'\n'.repeat(feedLines)}` : printed;
 }
 
 export function buildThermalReceipt(invoice: PrintableInvoice, layout: ThermalLayout, settings: ReceiptSettings = DEFAULT_RECEIPT_SETTINGS): string {

@@ -549,6 +549,9 @@ export function LabelDesignerPage() {
                   {selectedElement.content && (
                     <img src={selectedElement.content} alt="" style={{ maxWidth: 120, maxHeight: 60, marginTop: 6, border: `1px solid ${color.line}`, borderRadius: theme.radiusSm }} />
                   )}
+                  <span style={{ fontSize: 11.5, color: color.inkFaint, lineHeight: 1.35 }}>
+                    Use a clear logo PNG when possible. Colored poster backgrounds are cleaned for thermal print, but a plain background prints sharpest.
+                  </span>
                 </label>
               )}
 

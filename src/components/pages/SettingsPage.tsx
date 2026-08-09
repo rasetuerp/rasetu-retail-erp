@@ -5,8 +5,11 @@ import { useSession, type Session, type SessionUser } from '../../lib/session';
 import { theme } from '../../lib/theme';
 import {
   DEFAULT_RECEIPT_SECTIONS,
+  DEFAULT_RECEIPT_HEADER_ORDER,
   LOCKED_RECEIPT_SECTIONS,
+  RECEIPT_HEADER_LABELS,
   RECEIPT_SECTION_LABELS,
+  type ReceiptHeaderKey,
   type ReceiptSectionConfig,
   type ReceiptSectionKey,
 } from '../../lib/invoicePrint';
@@ -557,6 +560,7 @@ type ReceiptSettings = {
   headerLine2FontSize: number;
   headerLine3Text: string;
   headerLine3FontSize: number;
+  headerOrder: ReceiptHeaderKey[];
   exchangePolicyText: string;
   footerText: string;
   customMessageText: string;
@@ -566,12 +570,14 @@ type ReceiptSettings = {
   columns: number;
   marginLeftChars: number;
   marginRightChars: number;
+  endFeedLines: number;
 };
 
 function ReceiptSettingsCard() {
   const { session } = useSession();
   const [settings, setSettings] = useState<ReceiptSettings | null>(null);
   const [sections, setSections] = useState<ReceiptSectionConfig[]>(DEFAULT_RECEIPT_SECTIONS);
+  const [headerOrder, setHeaderOrder] = useState<ReceiptHeaderKey[]>(DEFAULT_RECEIPT_HEADER_ORDER);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const shopNameRef = useRef<HTMLInputElement>(null);
@@ -592,6 +598,7 @@ function ReceiptSettingsCard() {
   const columnsRef = useRef<HTMLSelectElement>(null);
   const marginLeftRef = useRef<HTMLInputElement>(null);
   const marginRightRef = useRef<HTMLInputElement>(null);
+  const endFeedLinesRef = useRef<HTMLInputElement>(null);
 
   async function loadSettings() {
     if (!session) return;
@@ -599,6 +606,7 @@ function ReceiptSettingsCard() {
       const res = await apiRequest<{ settings: ReceiptSettings }>(`/companies/${session.companyId}/invoices/receipt-settings`, { token: session.token });
       setSettings(res.settings);
       setSections([...(res.settings.sections?.length ? res.settings.sections : DEFAULT_RECEIPT_SECTIONS)].sort((a, b) => a.order - b.order));
+      setHeaderOrder(normalizeHeaderOrder(res.settings.headerOrder));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load receipt settings');
     }
@@ -624,6 +632,21 @@ function ReceiptSettingsCard() {
     });
   }
 
+  function normalizeHeaderOrder(order: ReceiptHeaderKey[] | undefined): ReceiptHeaderKey[] {
+    const valid = (order ?? []).filter((key): key is ReceiptHeaderKey => key in RECEIPT_HEADER_LABELS);
+    return [...valid, ...DEFAULT_RECEIPT_HEADER_ORDER.filter((key) => !valid.includes(key))];
+  }
+
+  function moveHeader(index: number, direction: -1 | 1) {
+    setHeaderOrder((prev) => {
+      const next = [...prev];
+      const target = index + direction;
+      if (target < 0 || target >= next.length) return prev;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
   async function handleSave() {
     if (!session) return;
     setError(null);
@@ -643,6 +666,7 @@ function ReceiptSettingsCard() {
           headerLine2FontSize: Number(headerLine2FontRef.current?.value ?? 10),
           headerLine3Text: headerLine3Ref.current?.value ?? '',
           headerLine3FontSize: Number(headerLine3FontRef.current?.value ?? 10),
+          headerOrder,
           exchangePolicyText: exchangeRef.current?.value ?? '',
           footerText: footerRef.current?.value ?? '',
           customMessageText: customMessageRef.current?.value ?? '',
@@ -651,11 +675,13 @@ function ReceiptSettingsCard() {
           columns: Number(columnsRef.current?.value ?? 32),
           marginLeftChars: Number(marginLeftRef.current?.value ?? 0),
           marginRightChars: Number(marginRightRef.current?.value ?? 0),
+          endFeedLines: Number(endFeedLinesRef.current?.value ?? 0),
           sections,
         },
       });
       setSettings(res.settings);
       setSections([...(res.settings.sections?.length ? res.settings.sections : DEFAULT_RECEIPT_SECTIONS)].sort((a, b) => a.order - b.order));
+      setHeaderOrder(normalizeHeaderOrder(res.settings.headerOrder));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to save receipt settings');
     } finally {
@@ -731,6 +757,18 @@ function ReceiptSettingsCard() {
             <input ref={headerLine3FontRef} key={`h3-font-${settings.headerLine3FontSize}`} type="number" min={8} max={24} defaultValue={settings.headerLine3FontSize ?? 10} style={{ ...inputStyle, width: 80 }} />
           </label>
         </div>
+        <div style={{ background: color.paper, border: `1px solid ${color.lineSoft}`, borderRadius: theme.radiusSm, padding: 10 }}>
+          <div style={{ ...groupHeadingStyle, marginBottom: 6 }}>Header print order</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {headerOrder.map((key, index) => (
+              <div key={key} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 6, alignItems: 'center', fontSize: 12.5, color: color.ink }}>
+                <span>{index + 1}. {RECEIPT_HEADER_LABELS[key]}</span>
+                <button type="button" onClick={() => moveHeader(index, -1)} disabled={index === 0} style={reorderBtn}>Up</button>
+                <button type="button" onClick={() => moveHeader(index, 1)} disabled={index === headerOrder.length - 1} style={reorderBtn}>Down</button>
+              </div>
+            ))}
+          </div>
+        </div>
         <div style={{ borderTop: `1px solid ${color.lineSoft}`, margin: '4px 0' }} />
         <label style={labelStyle}>
           Exchange policy text
@@ -762,8 +800,8 @@ function ReceiptSettingsCard() {
         <label style={labelStyle}>
           Thermal printer roll width
           <select ref={columnsRef} key={settings.columns} defaultValue={settings.columns} style={inputStyle}>
-            <option value={32}>58mm roll (32 columns) - default</option>
-            <option value={48}>80mm / 3 inch roll (48 columns)</option>
+            <option value={32}>58mm / 2 inch roll - 32 columns</option>
+            <option value={48}>80mm / 3 inch roll - 48 columns</option>
           </select>
         </label>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -775,6 +813,13 @@ function ReceiptSettingsCard() {
             Right margin (chars)
             <input ref={marginRightRef} key={`right-${settings.marginRightChars}`} type="number" min={0} max={12} defaultValue={settings.marginRightChars ?? 0} style={{ ...inputStyle, width: 120 }} />
           </label>
+          <label style={labelStyle}>
+            End feed lines
+            <input ref={endFeedLinesRef} key={`feed-${settings.endFeedLines}`} type="number" min={0} max={5} defaultValue={settings.endFeedLines ?? 0} style={{ ...inputStyle, width: 120 }} />
+          </label>
+        </div>
+        <div style={{ fontSize: 11.5, color: color.inkFaint, lineHeight: 1.4 }}>
+          Use 48 columns for 3 inch rolls. Keep end feed at 0 if the printer is already leaving extra blank paper after the footer.
         </div>
 
         <div style={{ borderTop: `1px solid ${color.lineSoft}`, margin: '4px 0' }} />

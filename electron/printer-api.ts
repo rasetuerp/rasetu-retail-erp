@@ -637,7 +637,10 @@ export class PrinterManager {
       .replace(/₹/g, 'Rs.')
       .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, ' ')
       .replace(/\r?\n/g, '\r\n')
-      .trimEnd();
+      .split('\r\n')
+      .map((line) => line.trimEnd())
+      .join('\r\n')
+      .replace(/[ \t]+$/g, '');
 
     return `${normalized}\r\n`;
   }

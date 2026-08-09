@@ -34,6 +34,7 @@ const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
   headerLine2FontSize: 10,
   headerLine3Text: '',
   headerLine3FontSize: 10,
+  headerOrder: ['shopName', 'localShopName', 'headerLine1', 'headerLine2', 'headerLine3'],
   exchangePolicyText: '',
   footerText: '',
   customMessageText: '',
@@ -43,6 +44,7 @@ const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
   columns: 32,
   marginLeftChars: 0,
   marginRightChars: 0,
+  endFeedLines: 0,
 };
 const STATUS_TABS: Array<{ value: InvoiceStatus | 'ALL'; label: string }> = [
   { value: 'POSTED', label: 'Posted' },
