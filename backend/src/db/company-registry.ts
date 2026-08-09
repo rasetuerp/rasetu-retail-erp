@@ -95,10 +95,10 @@ function openClient(companyId: string): CompanyPrismaClient {
 }
 
 async function configureCompanyClient(client: CompanyPrismaClient): Promise<void> {
-  await client.$executeRawUnsafe('PRAGMA busy_timeout = 10000');
-  await client.$executeRawUnsafe('PRAGMA journal_mode = WAL');
-  await client.$executeRawUnsafe('PRAGMA synchronous = NORMAL');
-  await client.$executeRawUnsafe('PRAGMA foreign_keys = ON');
+  await client.$queryRawUnsafe('PRAGMA busy_timeout = 10000');
+  await client.$queryRawUnsafe('PRAGMA journal_mode = WAL');
+  await client.$queryRawUnsafe('PRAGMA synchronous = NORMAL');
+  await client.$queryRawUnsafe('PRAGMA foreign_keys = ON');
 }
 
 /** Opens an existing company's database. 404s if that company was never provisioned; 503s (DRIVE_DISCONNECTED) if it's a known-external company whose drive isn't reachable right now. */

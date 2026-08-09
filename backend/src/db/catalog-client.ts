@@ -44,10 +44,10 @@ let catalogReady: Promise<void> | null = null;
 
 export function configureCatalogClient(): Promise<void> {
   catalogReady ??= (async () => {
-    await prisma.$executeRawUnsafe('PRAGMA busy_timeout = 10000');
-    await prisma.$executeRawUnsafe('PRAGMA journal_mode = WAL');
-    await prisma.$executeRawUnsafe('PRAGMA synchronous = NORMAL');
-    await prisma.$executeRawUnsafe('PRAGMA foreign_keys = ON');
+    await prisma.$queryRawUnsafe('PRAGMA busy_timeout = 10000');
+    await prisma.$queryRawUnsafe('PRAGMA journal_mode = WAL');
+    await prisma.$queryRawUnsafe('PRAGMA synchronous = NORMAL');
+    await prisma.$queryRawUnsafe('PRAGMA foreign_keys = ON');
   })();
   return catalogReady;
 }
