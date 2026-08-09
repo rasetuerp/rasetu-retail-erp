@@ -69,6 +69,50 @@ function blankTemplate(): LabelTemplateDto {
   };
 }
 
+function buildCalibrationDraft(draft: LabelTemplateDto): LabelTemplateDto {
+  const w = draft.widthMm;
+  const h = draft.heightMm;
+  const line = (id: string, xMm: number, yMm: number, widthMm: number, heightMm: number): DesignElement => ({
+    id,
+    type: 'line',
+    xMm,
+    yMm,
+    widthMm,
+    heightMm,
+  });
+  const text = (id: string, content: string, xMm: number, yMm: number, widthMm: number): DesignElement => ({
+    id,
+    type: 'text',
+    content,
+    xMm,
+    yMm,
+    widthMm,
+    heightMm: 3,
+    fontSize: 5,
+  });
+
+  const elements: DesignElement[] = [
+    line('cal-top', 0, 0, w, 0.6),
+    line('cal-bottom', 0, Math.max(0, h - 0.6), w, 0.6),
+    line('cal-left', 0, 0, 0.6, h),
+    line('cal-right', Math.max(0, w - 0.6), 0, 0.6, h),
+    line('cal-center-x', 0, Math.max(0, h / 2 - 0.2), w, 0.4),
+    line('cal-center-y', Math.max(0, w / 2 - 0.2), 0, 0.4, h),
+    text('cal-origin', '0,0', 1, 1, Math.max(10, w / 3)),
+    text('cal-size', `${w}x${h}mm`, Math.max(1, w - 24), Math.max(1, h - 4), 23),
+  ];
+
+  for (let x = 5; x < w; x += 5) elements.push(line(`cal-x-${x}`, x, 0, 0.25, h));
+  for (let y = 5; y < h; y += 5) elements.push(line(`cal-y-${y}`, 0, y, w, 0.25));
+
+  return {
+    ...draft,
+    id: `${draft.id || 'draft'}-calibration`,
+    name: `${draft.name} Calibration Grid`,
+    elements,
+  };
+}
+
 export function LabelDesignerPage() {
   const { session } = useSession();
   const [templates, setTemplates] = useState<LabelTemplateDto[]>([]);
@@ -90,6 +134,7 @@ export function LabelDesignerPage() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [copies, setCopies] = useState(1);
+  const [showCalibrationGrid, setShowCalibrationGrid] = useState(true);
 
   const dragState = useRef<{ id: string; startX: number; startY: number; startXMm: number; startYMm: number } | null>(null);
 
@@ -242,6 +287,25 @@ export function LabelDesignerPage() {
     }
   }
 
+  async function printCalibrationGrid() {
+    if (!window.rasetu) {
+      setStatus('Printing is only available in the desktop app.');
+      return;
+    }
+    setPrinting(true);
+    setError(null);
+    setStatus(null);
+    try {
+      const printerTemplate = await buildPrinterTemplate(buildCalibrationDraft(draft));
+      const result = await window.rasetu.printer.printBatch('default', [{ template: printerTemplate, data: {}, copies: 1 }]);
+      setStatus(result.message ?? (result.success ? 'Calibration grid printed.' : 'Calibration print failed.'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to print calibration grid.');
+    } finally {
+      setPrinting(false);
+    }
+  }
+
   const selectedElement = draft.elements.find((el) => el.id === selectedElementId) ?? null;
   const previewItem = items.find((i) => i.id === previewItemId) ?? null;
   const filteredItems = items.filter((i) => {
@@ -273,8 +337,14 @@ export function LabelDesignerPage() {
           </span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setShowCalibrationGrid((v) => !v)} style={secondaryBtn}>
+            <Crosshair size={13} /> {showCalibrationGrid ? 'Hide Grid' : 'Show Grid'}
+          </button>
           <button onClick={() => setSetupOpen(true)} style={secondaryBtn}><Settings size={13} /> Setup</button>
           <button onClick={() => void saveTemplate()} disabled={saving} style={secondaryBtn}>{saving ? 'Saving…' : 'Save'}</button>
+          <button onClick={() => void printCalibrationGrid()} disabled={printing} style={secondaryBtn}>
+            <Crosshair size={13} /> Print Calibration Grid
+          </button>
           <button onClick={() => void printSelectedLabels()} disabled={printing} style={primaryBtn}>
             <Printer size={13} /> {printing ? 'Printing…' : `Print Labels (${selectedItemIds.size})`}
           </button>
@@ -313,6 +383,7 @@ export function LabelDesignerPage() {
               </div>
             )}
             {draft.printConfig.loopZone && <LoopZoneOverlay loopZone={draft.printConfig.loopZone} widthMm={draft.widthMm} heightMm={draft.heightMm} />}
+            {showCalibrationGrid && <CalibrationGridOverlay widthMm={draft.widthMm} heightMm={draft.heightMm} />}
             {draft.elements.map((el) => {
               const isSelected = el.id === selectedElementId;
               return (
@@ -355,7 +426,7 @@ export function LabelDesignerPage() {
             })}
           </div>
           <p style={{ textAlign: 'center', fontSize: 10.5, color: color.inkFaint, margin: '8px 0 0' }}>
-            Shown at {ZOOM}x actual size{previewItem ? ` · previewing ${previewItem.sku}` : ''}
+            Shown at {ZOOM}x actual size{previewItem ? ` · previewing ${previewItem.sku}` : ''}{showCalibrationGrid ? ' · grid is 5mm' : ''}
           </p>
 
           <div style={{ marginTop: 14 }}>
@@ -843,6 +914,29 @@ function LoopZoneOverlay({ loopZone, widthMm, heightMm }: { loopZone: NonNullabl
   return (
     <div style={style} title="Loop / string-hole zone">
       <div style={{ width: vertical ? Math.min(8, sizeMm * ZOOM * 0.4) : 8, height: vertical ? 8 : Math.min(8, sizeMm * ZOOM * 0.4), borderRadius: '50%', border: `1.5px solid ${color.inkFaint}` }} />
+    </div>
+  );
+}
+
+function CalibrationGridOverlay({ widthMm, heightMm }: { widthMm: number; heightMm: number }) {
+  const verticals = [];
+  const horizontals = [];
+  for (let x = 5; x < widthMm; x += 5) verticals.push(x);
+  for (let y = 5; y < heightMm; y += 5) horizontals.push(y);
+
+  return (
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1 }}>
+      {verticals.map((x) => (
+        <div key={`v-${x}`} style={{ position: 'absolute', left: x * ZOOM, top: 0, width: 1, height: '100%', background: 'rgba(14,116,144,0.18)' }} />
+      ))}
+      {horizontals.map((y) => (
+        <div key={`h-${y}`} style={{ position: 'absolute', left: 0, top: y * ZOOM, width: '100%', height: 1, background: 'rgba(14,116,144,0.18)' }} />
+      ))}
+      <div style={{ position: 'absolute', inset: 0, border: '2px solid rgba(220,38,38,0.85)' }} />
+      <div style={{ position: 'absolute', left: widthMm * ZOOM / 2, top: 0, width: 1, height: '100%', background: 'rgba(220,38,38,0.55)' }} />
+      <div style={{ position: 'absolute', left: 0, top: heightMm * ZOOM / 2, width: '100%', height: 1, background: 'rgba(220,38,38,0.55)' }} />
+      <div style={{ position: 'absolute', left: 2, top: 2, fontSize: 9, color: '#dc2626', fontFamily: theme.mono, background: 'rgba(255,255,255,0.75)' }}>0,0</div>
+      <div style={{ position: 'absolute', right: 2, bottom: 2, fontSize: 9, color: '#dc2626', fontFamily: theme.mono, background: 'rgba(255,255,255,0.75)' }}>{widthMm}x{heightMm}</div>
     </div>
   );
 }

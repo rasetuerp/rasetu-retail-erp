@@ -49,6 +49,7 @@ const GST_OPTIONS = [0, 5, 12, 18, 28];
 
 const { color } = theme;
 const DEFAULT_SLAB: SlabRule = { thresholdMrp: 1000, rateBelowOrEqual: 5, rateAbove: 12 };
+const DEFAULT_UNITS = { allowed: ['PCS'], default: 'PCS' };
 // Round 5 — mirrors payments.ts's DEFAULT_PAYMENT_MODES, shown only until the
 // real list loads from the server (avoids an empty picker while loadAll runs).
 const FALLBACK_PAYMENT_MODES: PaymentModeEntry[] = [
@@ -213,31 +214,46 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
 
   async function loadAll() {
     if (!session) return;
-    try {
-      // Round 5 — the full CUSTOMER party list is no longer preloaded here;
-      // the customer panel below searches on demand instead.
-      const [itemsRes, heldRes, profileRes, modesRes, receiptSettingsRes] = await Promise.all([
-        apiRequest<{ items: Item[] }>(`/companies/${session.companyId}/items`, { token: session.token }),
-        apiRequest<{ invoices: InvoiceSummary[] }>(`/companies/${session.companyId}/invoices?status=HELD`, { token: session.token }),
-        apiRequest<{ profiles: VerticalProfile[] }>(`/meta/vertical-profiles`, { token: session.token }),
-        apiRequest<{ modes: PaymentModeEntry[] }>(`/companies/${session.companyId}/payments/modes`, { token: session.token }),
-        apiRequest<{ settings: ReceiptSettings }>(`/companies/${session.companyId}/invoices/receipt-settings`, { token: session.token }),
-      ]);
-      setItems(itemsRes.items);
-      setHeldBills(heldRes.invoices);
-      if (profileRes.profiles[0]?.gst?.mrpSlabRule) setSlabRule(profileRes.profiles[0].gst.mrpSlabRule);
-      if (profileRes.profiles[0]?.units) setUnits(profileRes.profiles[0].units);
-      const activeModes = modesRes.modes.filter((m) => m.isActive);
-      setPaymentModes(activeModes.length ? activeModes : FALLBACK_PAYMENT_MODES);
-      setReceiptSettings(receiptSettingsRes.settings);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to load billing data');
+    setError(null);
+    const [itemsRes, heldRes, profileRes, modesRes, receiptSettingsRes, categoriesRes] = await Promise.allSettled([
+      apiRequest<{ items: Item[] }>(`/companies/${session.companyId}/items`, { token: session.token }),
+      apiRequest<{ invoices: InvoiceSummary[] }>(`/companies/${session.companyId}/invoices?status=HELD`, { token: session.token }),
+      apiRequest<{ profiles: VerticalProfile[] }>(`/meta/vertical-profiles`, { token: session.token }),
+      apiRequest<{ modes: PaymentModeEntry[] }>(`/companies/${session.companyId}/payments/modes`, { token: session.token }),
+      apiRequest<{ settings: ReceiptSettings }>(`/companies/${session.companyId}/invoices/receipt-settings`, { token: session.token }),
+      apiRequest<{ categories: CategoryEntry[] }>(`/companies/${session.companyId}/categories`, { token: session.token }),
+    ]);
+
+    if (itemsRes.status === 'fulfilled') {
+      setItems(itemsRes.value.items);
+    } else {
+      setItems([]);
+      setError(itemsRes.reason instanceof ApiError ? itemsRes.reason.message : 'Failed to load stock items for billing.');
     }
-    // Round 13 — category master for the inline add-item form's CategoryPicker,
-    // same fetch pattern as ItemMasterPage/BulkStockEntryPage.
-    void apiRequest<{ categories: CategoryEntry[] }>(`/companies/${session.companyId}/categories`, { token: session.token })
-      .then((res) => setCategories(res.categories))
-      .catch(() => {});
+
+    if (heldRes.status === 'fulfilled') {
+      setHeldBills(heldRes.value.invoices);
+    } else {
+      setHeldBills([]);
+    }
+
+    if (profileRes.status === 'fulfilled') {
+      if (profileRes.value.profiles[0]?.gst?.mrpSlabRule) setSlabRule(profileRes.value.profiles[0].gst.mrpSlabRule);
+      if (profileRes.value.profiles[0]?.units) setUnits(profileRes.value.profiles[0].units);
+    } else {
+      setSlabRule(DEFAULT_SLAB);
+      setUnits(DEFAULT_UNITS);
+    }
+
+    if (modesRes.status === 'fulfilled') {
+      const activeModes = modesRes.value.modes.filter((m) => m.isActive);
+      setPaymentModes(activeModes.length ? activeModes : FALLBACK_PAYMENT_MODES);
+    } else {
+      setPaymentModes(FALLBACK_PAYMENT_MODES);
+    }
+
+    if (receiptSettingsRes.status === 'fulfilled') setReceiptSettings(receiptSettingsRes.value.settings);
+    if (categoriesRes.status === 'fulfilled') setCategories(categoriesRes.value.categories);
   }
 
   useEffect(() => {
@@ -429,12 +445,26 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
     try {
       let invoiceId = editingId;
       if (invoiceId) {
-        await apiRequest(`/companies/${session.companyId}/invoices/${invoiceId}`, { method: 'PUT', token: session.token, body });
+        try {
+          await apiRequest(`/companies/${session.companyId}/invoices/${invoiceId}`, { method: 'PUT', token: session.token, body });
+        } catch (err) {
+          throw new Error(`Could not update held bill before posting: ${err instanceof ApiError ? err.message : String(err)}`);
+        }
       } else {
-        const created = await apiRequest<{ invoice: { id: string } }>(`/companies/${session.companyId}/invoices`, { method: 'POST', token: session.token, body });
+        let created: { invoice: { id: string } };
+        try {
+          created = await apiRequest<{ invoice: { id: string } }>(`/companies/${session.companyId}/invoices`, { method: 'POST', token: session.token, body });
+        } catch (err) {
+          throw new Error(`Could not create bill: ${err instanceof ApiError ? err.message : String(err)}`);
+        }
         invoiceId = created.invoice.id;
       }
-      const posted = await apiRequest<{ invoice: PostedInvoice }>(`/companies/${session.companyId}/invoices/${invoiceId}/post`, { method: 'POST', token: session.token });
+      let posted: { invoice: PostedInvoice };
+      try {
+        posted = await apiRequest<{ invoice: PostedInvoice }>(`/companies/${session.companyId}/invoices/${invoiceId}/post`, { method: 'POST', token: session.token });
+      } catch (err) {
+        throw new Error(`Could not post bill: ${err instanceof ApiError ? err.message : String(err)}`);
+      }
       setPostedInvoice(posted.invoice);
       setPrintStatus(null);
       const full = await apiRequest<{ invoice: PrintableInvoice }>(`/companies/${session.companyId}/invoices/${invoiceId}`, { token: session.token });
@@ -442,7 +472,7 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
       resetCart();
       await loadAll();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to post bill');
+      setError(err instanceof Error ? err.message : 'Failed to post bill');
     }
   }
 

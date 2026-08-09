@@ -83,7 +83,7 @@ declare global {
         savePrinterSettings: (printerName: string, settings: unknown) => Promise<unknown>;
         printLabel: (printerName: string, labelData: unknown) => Promise<{ success: boolean; message: string }>;
         printBatch: (printerName: string, labels: unknown) => Promise<{ success: boolean; message: string }>;
-        printRaw: (printerName: string, rawData: unknown) => Promise<unknown>;
+        printRaw: (printerName: string, rawData: string) => Promise<{ success: boolean; message: string; error?: string }>;
         printTest: (printerName: string) => Promise<unknown>;
         testPrinterConnection: (printerName: string) => Promise<unknown>;
 

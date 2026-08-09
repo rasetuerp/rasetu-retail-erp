@@ -48,6 +48,16 @@ const numberInputStyle: React.CSSProperties = { padding: 8, border: `1px solid $
 const textInputStyle: React.CSSProperties = { ...numberInputStyle, width: 120, fontFamily: 'inherit' };
 const labelStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: color.inkSoft };
 const GST_OPTIONS = [0, 5, 12, 18, 28];
+const FALLBACK_PROFILE: VerticalProfile = {
+  itemAttributes: [
+    { key: 'category', label: 'Category', type: 'text', required: true, custom: false },
+    { key: 'brand', label: 'Brand', type: 'text', required: false, custom: false },
+    { key: 'size', label: 'Size', type: 'text', required: false, custom: false },
+    { key: 'color', label: 'Color', type: 'text', required: false, custom: false },
+  ],
+  units: { allowed: ['PCS'], default: 'PCS' },
+  gst: { mrpSlabRule: { thresholdMrp: 1000, rateBelowOrEqual: 5, rateAbove: 12 } },
+};
 
 // Mirrors backend/src/lib/gst-calc.ts's clothSlabGstRate, but reads the
 // actual slab thresholds from the fetched vertical profile instead of
@@ -170,14 +180,15 @@ export function ItemMasterPage() {
 
   useEffect(() => {
     if (!session) return;
-    void Promise.all([
-      apiRequest<{ profiles: VerticalProfile[] }>(`/meta/vertical-profiles`, { token: session.token }),
-      apiRequest<{ itemAttributes: VerticalProfile['itemAttributes'] }>(`/companies/${session.companyId}/items/fields`, { token: session.token }),
-    ])
-      .then(([profileRes, fieldsRes]) => {
-        if (profileRes.profiles[0]) setProfile({ ...profileRes.profiles[0], itemAttributes: fieldsRes.itemAttributes });
-      })
-      .catch(() => {});
+    void (async () => {
+      const base = await apiRequest<{ profiles: VerticalProfile[] }>(`/meta/vertical-profiles`, { token: session.token })
+        .then((res) => res.profiles[0] ?? FALLBACK_PROFILE)
+        .catch(() => FALLBACK_PROFILE);
+      const fields = await apiRequest<{ itemAttributes: VerticalProfile['itemAttributes'] }>(`/companies/${session.companyId}/items/fields`, { token: session.token })
+        .then((res) => res.itemAttributes)
+        .catch(() => FALLBACK_PROFILE.itemAttributes);
+      setProfile({ ...base, itemAttributes: fields });
+    })();
     void apiRequest<{ categories: CategoryEntry[] }>(`/companies/${session.companyId}/categories`, { token: session.token })
       .then((res) => setCategories(res.categories))
       .catch(() => {});

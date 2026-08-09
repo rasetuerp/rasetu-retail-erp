@@ -17,10 +17,26 @@ export type VerticalProfile = {
 };
 
 let cachedClothProfile: VerticalProfile | null = null;
+const FALLBACK_CLOTH_PROFILE: VerticalProfile = {
+  key: 'cloth',
+  itemAttributes: [
+    { key: 'category', label: 'Category', type: 'text', required: true },
+    { key: 'brand', label: 'Brand', type: 'text', required: false },
+    { key: 'size', label: 'Size', type: 'text', required: false },
+    { key: 'color', label: 'Color', type: 'text', required: false },
+  ],
+  units: { allowed: ['PCS'], default: 'PCS' },
+  gst: { mrpSlabRule: { thresholdMrp: 1000, rateBelowOrEqual: 5, rateAbove: 12 } },
+};
 
 export function getClothProfile(): VerticalProfile {
   if (cachedClothProfile) return cachedClothProfile;
   const profilePath = path.resolve(BACKEND_ROOT, '..', 'config', 'profiles', 'profile-cloth.json');
-  cachedClothProfile = JSON.parse(readFileSync(profilePath, 'utf8')) as VerticalProfile;
+  try {
+    cachedClothProfile = JSON.parse(readFileSync(profilePath, 'utf8')) as VerticalProfile;
+  } catch (err) {
+    console.warn(`[Profile] Could not read ${profilePath}; using built-in cloth defaults.`, err instanceof Error ? err.message : err);
+    cachedClothProfile = FALLBACK_CLOTH_PROFILE;
+  }
   return cachedClothProfile;
 }

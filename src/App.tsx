@@ -460,6 +460,12 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
     setStatus(null);
     setError(null);
     try {
+      if (role === 'receipt' && receiptSettings) {
+        const result = await window.rasetu.printer.printRaw('receipt', buildReceiptCalibrationText(receiptSettings));
+        if (!result.success) throw new Error(result.error ?? result.message);
+        setStatus(result.message || 'Receipt calibration test sent.');
+        return;
+      }
       const result = (await window.rasetu.printer.printTest(role)) as { message?: string; success?: boolean };
       setStatus(result.message ?? (result.success ? 'Test sent.' : 'Test print failed.'));
     } catch (err) {
@@ -543,7 +549,7 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
               <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                 <button onClick={() => void saveRole('receipt')} disabled={saving === 'receipt'} style={pdSaveBtn}>{saving === 'receipt' ? 'Saving…' : 'Save'}</button>
                 {receiptSettings && <button onClick={() => void saveReceiptPaper()} disabled={saving === 'receiptPaper'} style={pdSaveBtn}>{saving === 'receiptPaper' ? 'Saving...' : 'Save Paper'}</button>}
-                <button onClick={() => void printTest('receipt')} style={pdTestBtn}>Print Test</button>
+                <button onClick={() => void printTest('receipt')} style={pdTestBtn}>Print Width Test</button>
               </div>
             </div>
 
@@ -624,6 +630,32 @@ const pdTestBtn: React.CSSProperties = { padding: '9px 16px', background: color.
 const pdLabel: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: color.inkSoft };
 const pdInput: React.CSSProperties = { padding: 7, border: `1px solid ${color.line}`, borderRadius: theme.radiusSm, fontSize: 13, width: 90 };
 
+function buildReceiptCalibrationText(settings: ReceiptSettings): string {
+  const columns = Math.max(20, Math.min(64, Number(settings.columns) || 32));
+  const left = Math.max(0, Math.min(12, Number(settings.marginLeftChars) || 0));
+  const right = Math.max(0, Math.min(12, Number(settings.marginRightChars) || 0));
+  const contentWidth = Math.max(8, columns - left - right);
+  const pad = ' '.repeat(left);
+  const line = '-'.repeat(contentWidth);
+  const ruler = Array.from({ length: contentWidth }, (_, i) => (i + 1) % 10 === 0 ? String(Math.floor((i + 1) / 10) % 10) : String((i + 1) % 10)).join('');
+  const center = (text: string) => text.length >= contentWidth ? text.slice(0, contentWidth) : `${' '.repeat(Math.floor((contentWidth - text.length) / 2))}${text}`;
+
+  return [
+    pad + line,
+    pad + center('RASETU RECEIPT TEST'),
+    pad + line,
+    pad + `Paper: ${columns === 48 ? '80mm / 3 inch' : '58mm / 2 inch'}`.slice(0, contentWidth),
+    pad + `Width: ${columns} cols  L:${left} R:${right}`.slice(0, contentWidth),
+    pad + ruler,
+    pad + line,
+    pad + 'LEFT'.padEnd(contentWidth - 5, ' ') + 'RIGHT',
+    pad + center('CENTER CHECK'),
+    pad + line,
+    '',
+    '',
+  ].join('\n');
+}
+
 function AppShell() {
   const { session, setSession } = useSession();
   const [activeTab, setActiveTab] = useState<Tab>(() => (session ? (visibleTabs(session.user)[0]?.tab ?? 'dashboard') : 'dashboard'));
@@ -645,6 +677,7 @@ function AppShell() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloaded' | 'error'>('idle');
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState('0.1.3');
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -676,6 +709,7 @@ function AppShell() {
 
   useEffect(() => {
     if (!window.rasetu) return;
+    void window.rasetu.getAppInfo().then((info) => setAppVersion(info.version)).catch(() => {});
     return window.rasetu.onUpdateStatus((payload) => {
       const status = (payload as { status?: string })?.status;
       if (status === 'available') {
@@ -850,7 +884,7 @@ function AppShell() {
                 </button>
               )}
               <div style={{ padding: '8px 12px', fontSize: 10.5, color: updateStatus === 'error' ? color.alert : color.inkFaint, borderTop: `1px solid ${color.lineSoft}` }}>
-                v0.1.0{updateMessage ? ` - ${updateMessage}` : ''}
+                v{appVersion}{updateMessage ? ` - ${updateMessage}` : ''}
               </div>
               <button
                 onClick={() => { setProfileMenuOpen(false); setSession(null); }}
@@ -919,7 +953,7 @@ function AppShell() {
           <div style={{ flex: 1 }} />
           <div style={{ borderTop: '1px solid rgba(148,163,184,0.18)', paddingTop: 10, textAlign: 'center' }}>
             {!sidebarCollapsed && <div style={{ fontSize: 9.5, color: '#5C6B78' }}>A brand of Ratan Business Solutions</div>}
-            <div style={{ fontSize: 9.5, color: '#7C8B93', marginTop: 2 }}>v0.1.0</div>
+            <div style={{ fontSize: 9.5, color: '#7C8B93', marginTop: 2 }}>v{appVersion}</div>
           </div>
         </nav>
         <main style={{ flex: 1, overflow: 'auto', background: color.paper }}>
