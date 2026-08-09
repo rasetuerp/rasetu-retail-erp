@@ -503,31 +503,20 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
                   {printers.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
               </label>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                <label style={pdLabel}>
-                  Label width (mm)
-                  <input type="number" value={numLabel('labelWidth')} onChange={(e) => fieldLabel('labelWidth', Number(e.target.value) || 0)} style={pdInput} />
-                </label>
-                <label style={pdLabel}>
-                  Label height (mm)
-                  <input type="number" value={numLabel('labelHeight')} onChange={(e) => fieldLabel('labelHeight', Number(e.target.value) || 0)} style={pdInput} />
-                </label>
+              <div style={{ background: color.paper, border: `1px solid ${color.lineSoft}`, borderRadius: theme.radiusSm, padding: 10, fontSize: 11.5, color: color.inkSoft, lineHeight: 1.45, marginBottom: 10 }}>
+                Label size and gap are taken from the selected Label Designer template, so the printed label uses the same width and height shown in Live Preview.
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
                 <label style={pdLabel}>
-                  Margin left (mm)
+                  Global X nudge (mm)
                   <input type="number" value={numLabel('marginLeft')} onChange={(e) => fieldLabel('marginLeft', Number(e.target.value) || 0)} style={pdInput} />
                 </label>
                 <label style={pdLabel}>
-                  Margin top (mm)
+                  Global Y nudge (mm)
                   <input type="number" value={numLabel('marginTop')} onChange={(e) => fieldLabel('marginTop', Number(e.target.value) || 0)} style={pdInput} />
                 </label>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                <label style={pdLabel}>
-                  Gap length (mm)
-                  <input type="number" value={numLabel('gapLength')} onChange={(e) => fieldLabel('gapLength', Number(e.target.value) || 0)} style={pdInput} />
-                </label>
                 <label style={pdLabel}>
                   Darkness (0-15)
                   <input type="number" min={0} max={15} value={numLabel('darknessFactor')} onChange={(e) => fieldLabel('darknessFactor', Math.max(0, Math.min(15, Number(e.target.value) || 0)))} style={pdInput} />

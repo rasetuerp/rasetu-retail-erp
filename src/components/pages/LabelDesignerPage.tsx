@@ -712,6 +712,10 @@ function SetupModal({
             Height (mm)
             <input type="number" value={draft.heightMm} onChange={(e) => setDraft((p) => ({ ...p, heightMm: Number(e.target.value) || 1 }))} style={{ ...inputStyle, width: 90 }} />
           </label>
+          <label style={labelStyle}>
+            Gap (mm)
+            <input type="number" min={0} step={0.1} value={draft.printConfig.gapMm} onChange={(e) => setDraft((p) => ({ ...p, printConfig: { ...p.printConfig, gapMm: Number(e.target.value) || 0 } }))} style={{ ...inputStyle, width: 90 }} />
+          </label>
         </div>
         <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 }}>
           <input type="checkbox" checked={draft.isDefault} onChange={(e) => setDraft((p) => ({ ...p, isDefault: e.target.checked }))} />

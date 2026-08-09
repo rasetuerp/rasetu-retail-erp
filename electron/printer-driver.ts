@@ -54,6 +54,7 @@ export interface LabelTemplate {
   // buildLabel() below.
   xOffsetMm?: number;
   yOffsetMm?: number;
+  gapMm?: number;
   darkness?: number;
 }
 
@@ -240,8 +241,9 @@ export class TscPrinterDriver {
   }
 
   buildLabel(template: LabelTemplate, data: Record<string, string | number>, copies = 1): Buffer {
-    const width = this.settings.labelWidth || template.labelWidth;
-    const height = this.settings.labelHeight || template.labelHeight;
+    const width = template.labelWidth || this.settings.labelWidth;
+    const height = template.labelHeight || this.settings.labelHeight;
+    const gap = template.gapMm ?? this.settings.gapLength;
     // Round 21 — per-template calibration nudge on top of the printer's own
     // global margins/darkness (LabelDesignerPage.tsx's Print Calibration
     // panel); templates saved before this round have xOffsetMm/yOffsetMm: 0
@@ -251,7 +253,7 @@ export class TscPrinterDriver {
     const effectiveDarkness = template.darkness ?? this.settings.darknessFactor;
     const lines: string[] = [
       `SIZE ${width.toFixed(1)} mm,${height.toFixed(1)} mm`,
-      `GAP ${this.settings.gapLength.toFixed(1)} mm,0 mm`,
+      `GAP ${gap.toFixed(1)} mm,0 mm`,
       'DIRECTION 0',
       'REFERENCE 0,0',
       `DENSITY ${clamp(effectiveDarkness, 0, 15)}`,
