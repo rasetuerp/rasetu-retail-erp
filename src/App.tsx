@@ -402,7 +402,7 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
   const [printers, setPrinters] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [saving, setSaving] = useState<'receipt' | 'receiptPaper' | 'label' | 'invoice' | null>(null);
+  const [saving, setSaving] = useState<'receipt' | 'label' | 'invoice' | null>(null);
 
   useEffect(() => {
     if (!window.rasetu) {
@@ -468,21 +468,22 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
     }
   }
 
-  async function saveReceiptPaper() {
-    if (!session || !receiptSettings) return;
-    setSaving('receiptPaper');
+  async function saveReceiptSettings() {
+    if (!session || !receiptSettings || !window.rasetu || !config) return;
+    setSaving('receipt');
     setStatus(null);
     setError(null);
     try {
+      await window.rasetu.printer.saveConfig('receipt', config.receipt);
       const res = await apiRequest<{ settings: ReceiptSettings }>(`/companies/${session.companyId}/invoices/receipt-settings`, {
         method: 'PUT',
         token: session.token,
         body: receiptSettings,
       });
       setReceiptSettings(res.settings);
-      setStatus('Saved receipt paper width.');
+      setStatus('Saved receipt printer and paper settings.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save receipt paper width.');
+      setError(err instanceof Error ? err.message : 'Failed to save receipt settings.');
     } finally {
       setSaving(null);
     }
@@ -563,8 +564,7 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
                 </>
               )}
               <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                <button onClick={() => void saveRole('receipt')} disabled={saving === 'receipt'} style={pdSaveBtn}>{saving === 'receipt' ? 'Saving…' : 'Save'}</button>
-                {receiptSettings && <button onClick={() => void saveReceiptPaper()} disabled={saving === 'receiptPaper'} style={pdSaveBtn}>{saving === 'receiptPaper' ? 'Saving...' : 'Save Paper'}</button>}
+                <button onClick={() => void saveReceiptSettings()} disabled={saving === 'receipt' || !receiptSettings} style={pdSaveBtn}>{saving === 'receipt' ? 'Saving...' : 'Save Receipt Settings'}</button>
                 <button onClick={() => void printTest('receipt')} style={pdTestBtn}>Print HTML Test</button>
               </div>
             </div>
