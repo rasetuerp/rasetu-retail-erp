@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { requireAuth, requireCompanyDb } from '../lib/auth-middleware.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import { recordMutation } from '../lib/mutation-log.js';
-import { applyStockMovement } from './stock.js';
 import { HttpError } from '../lib/http-error.js';
 
 // Round 10 — Purchase Return. Deliberately structured as the mirror image of
@@ -71,29 +70,29 @@ debitNotesRouter.post(
           amount: i.qty * i.rate,
         })),
       });
+
+      for (const line of input.items) {
+        await tx.stockMovement.create({
+          data: {
+            itemId: line.itemId,
+            type: 'PURCHASE_RETURN',
+            qty: -line.qty,
+            refType: 'DebitNote',
+            refId: created.id,
+          },
+        });
+        await tx.item.update({ where: { id: line.itemId }, data: { stockQty: { decrement: line.qty } } });
+      }
+
+      const party = await tx.party.findUniqueOrThrow({ where: { id: purchase.partyId } });
+      const newBalance = Number(party.balance) - amount;
+      await tx.ledgerEntry.create({
+        data: { partyId: purchase.partyId, debit: 0, credit: amount, balance: newBalance, refType: 'DebitNote', refId: created.id },
+      });
+      await tx.party.update({ where: { id: purchase.partyId }, data: { balance: newBalance } });
+
       return created;
     });
-
-    // Stock leaves — going back to the supplier.
-    for (const line of input.items) {
-      await applyStockMovement(prisma, {
-        itemId: line.itemId,
-        type: 'PURCHASE_RETURN',
-        qty: -line.qty,
-        refType: 'DebitNote',
-        refId: note.id,
-      });
-    }
-
-    // Reduces what the shop owes the supplier — same "credit reduces
-    // balance" convention as payments.ts/credit-notes.ts.
-    const party = await prisma.party.findUniqueOrThrow({ where: { id: purchase.partyId } });
-    const newBalance = Number(party.balance) - amount;
-    await prisma.ledgerEntry.create({
-      data: { partyId: purchase.partyId, debit: 0, credit: amount, balance: newBalance, refType: 'DebitNote', refId: note.id },
-    });
-    await prisma.party.update({ where: { id: purchase.partyId }, data: { balance: newBalance } });
-
     await recordMutation(prisma, {
       userId: req.user?.id,
       entity: 'DebitNote',

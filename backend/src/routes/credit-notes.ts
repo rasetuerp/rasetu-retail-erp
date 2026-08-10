@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { requireAuth, requireCompanyDb } from '../lib/auth-middleware.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import { recordMutation } from '../lib/mutation-log.js';
-import { applyStockMovement } from './stock.js';
 import { HttpError } from '../lib/http-error.js';
 import { getPaymentModes } from './payments.js';
 
@@ -52,9 +51,6 @@ creditNotesRouter.post(
     const count = await prisma.creditNote.count({ where: { companyId: req.params.companyId } });
     const number = `CN/${new Date().getFullYear()}/${String(count + 1).padStart(4, '0')}`;
 
-    // Company (catalog-adjacent) writes here are all within one SQLite file,
-    // unlike companies.ts's cross-database Company+User creation — a real
-    // $transaction is possible and used for the note + its line items.
     const note = await prisma.$transaction(async (tx) => {
       const created = await tx.creditNote.create({
         data: {
@@ -75,38 +71,36 @@ creditNotesRouter.post(
           amount: i.qty * i.rate,
         })),
       });
+
+      for (const line of input.items) {
+        await tx.stockMovement.create({
+          data: {
+            itemId: line.itemId,
+            type: 'SALES_RETURN',
+            qty: line.qty,
+            refType: 'CreditNote',
+            refId: created.id,
+          },
+        });
+        await tx.item.update({ where: { id: line.itemId }, data: { stockQty: { increment: line.qty } } });
+      }
+
+      const lastEntry = await tx.ledgerEntry.findFirst({ where: { partyId: invoice.partyId! }, orderBy: { date: 'desc' } });
+      const runningBalance = (lastEntry?.balance ? Number(lastEntry.balance) : 0) - amount;
+      await tx.ledgerEntry.create({
+        data: {
+          partyId: invoice.partyId!,
+          credit: amount,
+          balance: runningBalance,
+          refType: 'CreditNote',
+          refId: created.id,
+          invoiceId: invoice.id,
+        },
+      });
+      await tx.party.update({ where: { id: invoice.partyId! }, data: { balance: runningBalance } });
+
       return created;
     });
-
-    // Stock comes back — one movement per returned line, same engine every
-    // other stock-affecting write goes through (stock.ts's applyStockMovement,
-    // RULES.md-equivalent "never touch Item.stockQty directly").
-    for (const line of input.items) {
-      await applyStockMovement(prisma, {
-        itemId: line.itemId,
-        type: 'SALES_RETURN',
-        qty: line.qty,
-        refType: 'CreditNote',
-        refId: note.id,
-      });
-    }
-
-    // Same running-balance ledger pattern payments.ts already uses — a
-    // return reduces what the customer owes, exactly like a payment does.
-    const lastEntry = await prisma.ledgerEntry.findFirst({ where: { partyId: invoice.partyId }, orderBy: { date: 'desc' } });
-    const runningBalance = (lastEntry?.balance ? Number(lastEntry.balance) : 0) - amount;
-    await prisma.ledgerEntry.create({
-      data: {
-        partyId: invoice.partyId,
-        credit: amount,
-        balance: runningBalance,
-        refType: 'CreditNote',
-        refId: note.id,
-        invoiceId: invoice.id,
-      },
-    });
-    await prisma.party.update({ where: { id: invoice.partyId }, data: { balance: runningBalance } });
-
     await recordMutation(prisma, {
       userId: req.user?.id,
       entity: 'CreditNote',
@@ -156,36 +150,39 @@ creditNotesRouter.post(
     // Logged as a real Payment row (direction OUT) for the audit trail, same
     // as any other money movement — but its balance effect is applied
     // directly below, not through POST /payments' own math.
-    const payment = await prisma.payment.create({
-      data: {
-        companyId: req.params.companyId,
-        mode: input.mode,
-        amount: input.amount,
-        direction: 'OUT',
-        invoiceId: note.invoiceId,
-        partyId: note.partyId,
-      },
-    });
+    const { payment, updated } = await prisma.$transaction(async (tx) => {
+      const payment = await tx.payment.create({
+        data: {
+          companyId: req.params.companyId,
+          mode: input.mode,
+          amount: input.amount,
+          direction: 'OUT',
+          invoiceId: note.invoiceId,
+          partyId: note.partyId,
+        },
+      });
 
-    const party = await prisma.party.findUniqueOrThrow({ where: { id: note.partyId } });
-    const runningBalance = Number(party.balance) + input.amount;
-    await prisma.ledgerEntry.create({
-      data: {
-        partyId: note.partyId,
-        debit: input.amount,
-        balance: runningBalance,
-        refType: 'Refund',
-        refId: note.id,
-        invoiceId: note.invoiceId,
-      },
-    });
-    await prisma.party.update({ where: { id: note.partyId }, data: { balance: runningBalance } });
+      const party = await tx.party.findUniqueOrThrow({ where: { id: note.partyId } });
+      const runningBalance = Number(party.balance) + input.amount;
+      await tx.ledgerEntry.create({
+        data: {
+          partyId: note.partyId,
+          debit: input.amount,
+          balance: runningBalance,
+          refType: 'Refund',
+          refId: note.id,
+          invoiceId: note.invoiceId,
+        },
+      });
+      await tx.party.update({ where: { id: note.partyId }, data: { balance: runningBalance } });
 
-    const updated = await prisma.creditNote.update({
-      where: { id: note.id },
-      data: { refundedAmount: Number(note.refundedAmount) + input.amount },
-    });
+      const updated = await tx.creditNote.update({
+        where: { id: note.id },
+        data: { refundedAmount: Number(note.refundedAmount) + input.amount },
+      });
 
+      return { payment, updated };
+    });
     await recordMutation(prisma, {
       userId: req.user?.id,
       entity: 'CreditNote',

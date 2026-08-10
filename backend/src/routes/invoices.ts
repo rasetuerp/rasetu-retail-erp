@@ -5,7 +5,6 @@ import { requireAuth, requireCompanyDb, requireRole } from '../lib/auth-middlewa
 import { asyncHandler } from '../lib/async-handler.js';
 import { recordMutation } from '../lib/mutation-log.js';
 import { HttpError } from '../lib/http-error.js';
-import { applyStockMovement } from './stock.js';
 import { computeInvoiceTotals, gstinStateCode, type CalcLineInput } from '../lib/gst-calc.js';
 import { prisma as catalogPrisma } from '../db/catalog-client.js';
 import type { PrismaClient as CompanyPrismaClient } from '../generated/company-client/index.js';
@@ -612,20 +611,6 @@ invoicesRouter.post(
     // bill could be posted (and stock driven negative) for more than a shop
     // had on hand. Checked before the transaction so a short-stock item
     // blocks the post before any balance/number/stock changes happen.
-    const stockByItem = await prisma.item.findMany({
-      where: { id: { in: invoice.items.map((line) => line.itemId) } },
-      select: { id: true, sku: true, stockQty: true },
-    });
-    const shortItems = invoice.items
-      .map((line) => {
-        const item = stockByItem.find((i) => i.id === line.itemId);
-        return item && Number(line.qty) > Number(item.stockQty) ? `${item.sku} (have ${item.stockQty}, need ${line.qty})` : null;
-      })
-      .filter((msg): msg is string => msg !== null);
-    if (shortItems.length > 0) {
-      throw new HttpError(400, `Not enough stock to post this bill: ${shortItems.join(', ')}`);
-    }
-
     // Number assignment + party ledger update run in one transaction so a
     // concurrent post can't read the same "next number" twice
     // (docs/SCHEMA.md: invoice numbers must be sequential & gap-free).
@@ -638,6 +623,20 @@ invoicesRouter.post(
     // every post started failing on the unique constraint). Max-based is
     // self-correcting regardless of posting order or historical gaps.
     const posted = await prisma.$transaction(async (tx) => {
+      const stockByItem = await tx.item.findMany({
+        where: { id: { in: invoice.items.map((line) => line.itemId) } },
+        select: { id: true, sku: true, stockQty: true },
+      });
+      const shortItems = invoice.items
+        .map((line) => {
+          const item = stockByItem.find((i) => i.id === line.itemId);
+          return item && Number(line.qty) > Number(item.stockQty) ? `${item.sku} (have ${item.stockQty}, need ${line.qty})` : null;
+        })
+        .filter((msg): msg is string => msg !== null);
+      if (shortItems.length > 0) {
+        throw new HttpError(400, `Not enough stock to post this bill: ${shortItems.join(', ')}`);
+      }
+
       const existing = await tx.invoice.findMany({
         where: { companyId: invoice.companyId, fyLabel, status: { in: ['POSTED', 'CANCELLED'] } },
         select: { number: true },
@@ -676,21 +675,24 @@ invoicesRouter.post(
         await tx.party.update({ where: { id: invoice.partyId }, data: { balance: newBalance } });
       }
 
+      for (const line of invoice.items) {
+        await tx.stockMovement.create({
+          data: {
+            itemId: line.itemId,
+            type: 'SALE',
+            qty: -Number(line.qty),
+            refType: 'Invoice',
+            refId: invoice.id,
+          },
+        });
+        await tx.item.update({ where: { id: line.itemId }, data: { stockQty: { decrement: Number(line.qty) } } });
+      }
+
       return tx.invoice.update({
         where: { id: invoice.id },
         data: { status: 'POSTED', number, fyLabel, oldBalance, newBalance },
       });
     });
-
-    for (const line of invoice.items) {
-      await applyStockMovement(prisma, {
-        itemId: line.itemId,
-        type: 'SALE',
-        qty: -Number(line.qty),
-        refType: 'Invoice',
-        refId: invoice.id,
-      });
-    }
 
     await recordMutation(prisma, {
       userId: req.user?.id,
@@ -721,55 +723,61 @@ invoicesRouter.post(
     // TODO: block cancel once the invoice's period is locked (Setting-based
     // period lock, Day 7) — cancel becomes credit-note-only after filing.
 
-    const cancelled = await prisma.invoice.update({
-      where: { id: invoice.id },
-      data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: input.reason },
-    });
+    const cancelled = await prisma.$transaction(async (tx) => {
+      const updated = await tx.invoice.update({
+        where: { id: invoice.id },
+        data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: input.reason },
+      });
 
-    if (invoice.status === 'POSTED') {
-      for (const line of invoice.items) {
-        await applyStockMovement(prisma, {
-          itemId: line.itemId,
-          type: 'SALE',
-          qty: Number(line.qty), // reverse
-          refType: 'Invoice',
-          refId: invoice.id,
-          reason: `Cancelled: ${input.reason}`,
-        });
-      }
-
-      // Round 19 — cancelling a posted invoice reversed stock but never
-      // touched the party's ledger balance: the debit posted for the
-      // invoice's total, and the credit(s) posted for any payments already
-      // recorded against it, both stayed on the books forever, leaving
-      // Amount Due wrong on every invoice/party screen from then on.
-      // Payment rows themselves are left untouched (same never-delete
-      // philosophy as invoices) — only their balance effect is reversed here,
-      // via one consolidated ledger entry.
-      if (invoice.partyId) {
-        const payments = await prisma.payment.findMany({ where: { invoiceId: invoice.id, partyId: invoice.partyId } });
-        const paymentsTotal = payments.reduce((s, p) => s + Number(p.amount), 0);
-        const netReversal = Number(invoice.total) - paymentsTotal;
-        if (netReversal !== 0) {
-          const lastEntry = await prisma.ledgerEntry.findFirst({ where: { partyId: invoice.partyId }, orderBy: { date: 'desc' } });
-          const currentBalance = lastEntry?.balance ? Number(lastEntry.balance) : 0;
-          const newBalance = currentBalance - netReversal;
-          await prisma.ledgerEntry.create({
+      if (invoice.status === 'POSTED') {
+        for (const line of invoice.items) {
+          await tx.stockMovement.create({
             data: {
-              partyId: invoice.partyId,
-              debit: netReversal < 0 ? -netReversal : 0,
-              credit: netReversal > 0 ? netReversal : 0,
-              balance: newBalance,
+              itemId: line.itemId,
+              type: 'SALE',
+              qty: Number(line.qty), // reverse
               refType: 'Invoice',
               refId: invoice.id,
-              invoiceId: invoice.id,
+              reason: `Cancelled: ${input.reason}`,
             },
           });
-          await prisma.party.update({ where: { id: invoice.partyId }, data: { balance: newBalance } });
+          await tx.item.update({ where: { id: line.itemId }, data: { stockQty: { increment: Number(line.qty) } } });
+        }
+
+        // Round 19 â€” cancelling a posted invoice reversed stock but never
+        // touched the party's ledger balance: the debit posted for the
+        // invoice's total, and the credit(s) posted for any payments already
+        // recorded against it, both stayed on the books forever, leaving
+        // Amount Due wrong on every invoice/party screen from then on.
+        // Payment rows themselves are left untouched (same never-delete
+        // philosophy as invoices) â€” only their balance effect is reversed here,
+        // via one consolidated ledger entry.
+        if (invoice.partyId) {
+          const payments = await tx.payment.findMany({ where: { invoiceId: invoice.id, partyId: invoice.partyId } });
+          const paymentsTotal = payments.reduce((s, p) => s + Number(p.amount), 0);
+          const netReversal = Number(invoice.total) - paymentsTotal;
+          if (netReversal !== 0) {
+            const lastEntry = await tx.ledgerEntry.findFirst({ where: { partyId: invoice.partyId }, orderBy: { date: 'desc' } });
+            const currentBalance = lastEntry?.balance ? Number(lastEntry.balance) : 0;
+            const newBalance = currentBalance - netReversal;
+            await tx.ledgerEntry.create({
+              data: {
+                partyId: invoice.partyId,
+                debit: netReversal < 0 ? -netReversal : 0,
+                credit: netReversal > 0 ? netReversal : 0,
+                balance: newBalance,
+                refType: 'Invoice',
+                refId: invoice.id,
+                invoiceId: invoice.id,
+              },
+            });
+            await tx.party.update({ where: { id: invoice.partyId }, data: { balance: newBalance } });
+          }
         }
       }
-    }
 
+      return updated;
+    });
     await recordMutation(prisma, {
       userId: req.user?.id,
       entity: 'Invoice',

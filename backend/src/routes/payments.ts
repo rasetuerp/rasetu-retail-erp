@@ -116,32 +116,33 @@ paymentsRouter.post(
       direction = party?.type === 'SUPPLIER' ? 'OUT' : 'IN';
     }
 
-    const payment = await prisma.payment.create({
-      data: { companyId: req.params.companyId, ...input, direction },
+    const payment = await prisma.$transaction(async (tx) => {
+      const created = await tx.payment.create({
+        data: { companyId: req.params.companyId, ...input, direction },
+      });
+
+      // Payment and party ledger must commit together so balances cannot drift.
+      if (input.partyId) {
+        const lastEntry = await tx.ledgerEntry.findFirst({
+          where: { partyId: input.partyId },
+          orderBy: { date: 'desc' },
+        });
+        const runningBalance = (lastEntry?.balance ? Number(lastEntry.balance) : 0) - input.amount;
+        await tx.ledgerEntry.create({
+          data: {
+            partyId: input.partyId,
+            credit: input.amount,
+            balance: runningBalance,
+            refType: 'Payment',
+            refId: created.id,
+            invoiceId: input.invoiceId,
+          },
+        });
+        await tx.party.update({ where: { id: input.partyId }, data: { balance: runningBalance } });
+      }
+
+      return created;
     });
-
-    // Round 18 — CREDIT means paid by credit card, not "left on account";
-    // it reduces the balance exactly like every other collection mode. (An
-    // earlier round wrongly treated CREDIT as a deferred/uncollected sale.)
-    if (input.partyId) {
-      const lastEntry = await prisma.ledgerEntry.findFirst({
-        where: { partyId: input.partyId },
-        orderBy: { date: 'desc' },
-      });
-      const runningBalance = (lastEntry?.balance ? Number(lastEntry.balance) : 0) - input.amount;
-      await prisma.ledgerEntry.create({
-        data: {
-          partyId: input.partyId,
-          credit: input.amount,
-          balance: runningBalance,
-          refType: 'Payment',
-          refId: payment.id,
-          invoiceId: input.invoiceId,
-        },
-      });
-      await prisma.party.update({ where: { id: input.partyId }, data: { balance: runningBalance } });
-    }
-
     await recordMutation(prisma, {
       userId: req.user?.id,
       entity: 'Payment',

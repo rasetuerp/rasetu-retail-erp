@@ -192,39 +192,43 @@ itemsRouter.post(
     const prisma = requireCompanyDb(req);
     const input = createItemSchema.parse(req.body);
 
-    const item = await prisma.item.create({
-      data: {
-        companyId: req.params.companyId,
-        sku: input.sku,
-        barcode: input.barcode,
-        hsn: input.hsn,
-        category: input.category,
-        brand: input.brand,
-        size: input.size,
-        color: input.color,
-        unit: input.unit,
-        purchaseRate: input.purchaseRate,
-        mrp: input.mrp,
-        sellingRate: input.sellingRate,
-        gstRate: input.gstRate,
-        gstInclusive: input.gstInclusive,
-        stockQty: input.openingStock,
-        minStock: input.minStock,
-        commodity: input.commodity,
-        itemType: input.itemType,
-        brandCode: input.brandCode,
-        styleCode: input.styleCode,
-        mfgDate: input.mfgDate,
-        netQtyLabel: input.netQtyLabel,
-        customFields: input.customFields,
-      },
-    });
-
-    if (input.openingStock !== 0) {
-      await prisma.stockMovement.create({
-        data: { itemId: item.id, type: 'OPENING', qty: input.openingStock },
+    const item = await prisma.$transaction(async (tx) => {
+      const created = await tx.item.create({
+        data: {
+          companyId: req.params.companyId,
+          sku: input.sku,
+          barcode: input.barcode,
+          hsn: input.hsn,
+          category: input.category,
+          brand: input.brand,
+          size: input.size,
+          color: input.color,
+          unit: input.unit,
+          purchaseRate: input.purchaseRate,
+          mrp: input.mrp,
+          sellingRate: input.sellingRate,
+          gstRate: input.gstRate,
+          gstInclusive: input.gstInclusive,
+          stockQty: input.openingStock,
+          minStock: input.minStock,
+          commodity: input.commodity,
+          itemType: input.itemType,
+          brandCode: input.brandCode,
+          styleCode: input.styleCode,
+          mfgDate: input.mfgDate,
+          netQtyLabel: input.netQtyLabel,
+          customFields: input.customFields,
+        },
       });
-    }
+
+      if (input.openingStock !== 0) {
+        await tx.stockMovement.create({
+          data: { itemId: created.id, type: 'OPENING', qty: input.openingStock },
+        });
+      }
+
+      return created;
+    });
 
     await recordMutation(prisma, {
       userId: req.user?.id,
