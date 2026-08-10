@@ -617,15 +617,17 @@ function buildReceiptHeaderHtml(inv: PrintableInvoice, settings: ReceiptSettings
 
 export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: ThermalLayout, settings: ReceiptSettings = DEFAULT_RECEIPT_SETTINGS): string {
   const paperMm = (settings.columns ?? 32) >= 48 ? 80 : 58;
-  const contentMm = paperMm === 80 ? 76 : 54;
+  const contentMm = paperMm === 80 ? 72 : 50;
+  const sideMarginMm = paperMm === 80 ? 4 : 3;
+  const monoFontPx = paperMm === 80 ? 9 : 9.5;
   const text = buildThermalReceipt(invoice, layout, settings);
   const blockSettings = { ...settings, endFeedLines: 0 };
   if (layout !== 'receipt') {
     return `<!doctype html><html><head><meta charset="utf-8" /><style>
       @page{size:${paperMm}mm auto;margin:0}
       body{margin:0;background:#fff;color:#000}
-      pre{box-sizing:border-box;width:${contentMm}mm;margin:0;padding:1mm 1.5mm 0;font:11px/1.22 Consolas,"Courier New",monospace;white-space:pre-wrap}
-      .cut{width:${contentMm}mm;margin:1mm 1.5mm 0;border-top:1px dashed #000;text-align:center;font:9px/1.2 Arial,sans-serif}
+      pre{box-sizing:border-box;width:${contentMm}mm;margin:0 0 0 ${sideMarginMm}mm;padding:1mm 0 0;font:${monoFontPx}px/1.22 "Courier New",Consolas,monospace;white-space:pre-wrap}
+      .cut{width:${contentMm}mm;margin:1mm 0 0 ${sideMarginMm}mm;border-top:1px dashed #000;text-align:center;font:9px/1.2 Arial,sans-serif}
     </style></head><body><pre>${escapeHtml(text)}</pre><div class="cut">CUT HERE</div></body></html>`;
   }
 
@@ -658,11 +660,11 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
     @page{size:${paperMm}mm auto;margin:0}
     *{box-sizing:border-box}
     body{margin:0;background:#fff;color:#000}
-    .receipt{width:${contentMm}mm;margin:0;padding:1mm 1.5mm 0;text-align:center}
+    .receipt{width:${contentMm}mm;margin:0 0 0 ${sideMarginMm}mm;padding:1mm 0 0;text-align:center;overflow:hidden}
     .header{font-family:"Nirmala UI","Noto Sans Kannada",Arial,sans-serif;line-height:1.18;text-align:center}
     .receipt-header-line{font-weight:600;white-space:pre-wrap;overflow-wrap:anywhere}
     .receipt-logo{display:block;height:auto;object-fit:contain;margin:0 auto .8mm;image-rendering:auto}
-    pre{margin:0;text-align:left;font:11px/1.22 Consolas,"Courier New",monospace;white-space:pre-wrap}
+    pre{margin:0;text-align:left;font:${monoFontPx}px/1.22 "Courier New",Consolas,monospace;white-space:pre-wrap}
     .cut{margin-top:1mm;border-top:1px dashed #000;text-align:center;font:9px/1.2 Arial,sans-serif}
     .feed{height:${feedMm}mm}
   </style></head><body><div class="receipt">${htmlBlocks.join('')}<div class="cut">CUT HERE</div><div class="feed"></div></div></body></html>`;
