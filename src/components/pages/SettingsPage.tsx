@@ -573,6 +573,9 @@ type ReceiptSettings = {
   marginLeftChars: number;
   marginRightChars: number;
   endFeedLines: number;
+  receiptPrintableWidthMm: number;
+  receiptLeftMarginMm: number;
+  receiptBodyFontPx: number;
 };
 
 function ReceiptSettingsCard() {
@@ -603,6 +606,9 @@ function ReceiptSettingsCard() {
   const marginLeftRef = useRef<HTMLInputElement>(null);
   const marginRightRef = useRef<HTMLInputElement>(null);
   const endFeedLinesRef = useRef<HTMLInputElement>(null);
+  const receiptPrintableWidthRef = useRef<HTMLInputElement>(null);
+  const receiptLeftMarginMmRef = useRef<HTMLInputElement>(null);
+  const receiptBodyFontPxRef = useRef<HTMLInputElement>(null);
 
   async function loadSettings() {
     if (!session) return;
@@ -703,6 +709,9 @@ function ReceiptSettingsCard() {
           marginLeftChars: Number(marginLeftRef.current?.value ?? 0),
           marginRightChars: Number(marginRightRef.current?.value ?? 0),
           endFeedLines: Number(endFeedLinesRef.current?.value ?? 0),
+          receiptPrintableWidthMm: Number(receiptPrintableWidthRef.current?.value ?? 0),
+          receiptLeftMarginMm: Number(receiptLeftMarginMmRef.current?.value ?? 0),
+          receiptBodyFontPx: Number(receiptBodyFontPxRef.current?.value ?? 0),
           sections,
         },
       });
@@ -877,8 +886,22 @@ function ReceiptSettingsCard() {
             <input ref={endFeedLinesRef} key={`feed-${settings.endFeedLines}`} type="number" min={0} max={5} defaultValue={settings.endFeedLines ?? 0} style={{ ...inputStyle, width: 120 }} />
           </label>
         </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <label style={labelStyle}>
+            Receipt printable width (mm)
+            <input ref={receiptPrintableWidthRef} key={`receipt-width-mm-${settings.receiptPrintableWidthMm}`} type="number" min={0} max={90} step="0.5" defaultValue={settings.receiptPrintableWidthMm ?? 0} placeholder={settings.columns === 48 ? '72' : '50'} style={{ ...inputStyle, width: 150 }} />
+          </label>
+          <label style={labelStyle}>
+            Receipt left margin (mm)
+            <input ref={receiptLeftMarginMmRef} key={`receipt-left-mm-${settings.receiptLeftMarginMm}`} type="number" min={0} max={12} step="0.5" defaultValue={settings.receiptLeftMarginMm ?? 0} placeholder={settings.columns === 48 ? '4' : '3'} style={{ ...inputStyle, width: 140 }} />
+          </label>
+          <label style={labelStyle}>
+            Receipt body font (px)
+            <input ref={receiptBodyFontPxRef} key={`receipt-font-px-${settings.receiptBodyFontPx}`} type="number" min={0} max={12} step="0.5" defaultValue={settings.receiptBodyFontPx ?? 0} placeholder={settings.columns === 48 ? '9' : '9.5'} style={{ ...inputStyle, width: 130 }} />
+          </label>
+        </div>
         <div style={{ fontSize: 11.5, color: color.inkFaint, lineHeight: 1.4 }}>
-          Use 48 columns for 3 inch rolls. Keep end feed at 0 if the printer is already leaving extra blank paper after the footer.
+          Use 48 columns for 3 inch rolls. Leave mm/font fields at 0 for auto defaults; adjust them only after printing the receipt calibration test.
         </div>
 
         <div style={{ borderTop: `1px solid ${color.lineSoft}`, margin: '4px 0' }} />

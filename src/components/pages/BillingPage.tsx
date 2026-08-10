@@ -206,6 +206,9 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
     marginLeftChars: 0,
     marginRightChars: 0,
     endFeedLines: 0,
+    receiptPrintableWidthMm: 0,
+    receiptLeftMarginMm: 0,
+    receiptBodyFontPx: 0,
   });
   const [a4Layout, setA4Layout] = useState<A4Layout>('a4');
   const [printStatus, setPrintStatus] = useState<string | null>(null);

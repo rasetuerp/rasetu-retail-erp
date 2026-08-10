@@ -242,6 +242,9 @@ const receiptSettingsSchema = z.object({
   marginLeftChars: z.number().int().min(0).max(12).default(0),
   marginRightChars: z.number().int().min(0).max(12).default(0),
   endFeedLines: z.number().int().min(0).max(5).default(0),
+  receiptPrintableWidthMm: z.number().min(0).max(90).default(0),
+  receiptLeftMarginMm: z.number().min(0).max(12).default(0),
+  receiptBodyFontPx: z.number().min(0).max(12).default(0),
 });
 const DEFAULT_RECEIPT_SETTINGS = receiptSettingsSchema.parse({});
 

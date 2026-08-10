@@ -115,6 +115,9 @@ export type ReceiptSettings = {
   marginLeftChars: number;
   marginRightChars: number;
   endFeedLines: number;
+  receiptPrintableWidthMm: number;
+  receiptLeftMarginMm: number;
+  receiptBodyFontPx: number;
 };
 
 export type ReceiptHeaderKey = 'logo' | 'shopName' | 'localShopName' | 'headerLine1' | 'headerLine2' | 'headerLine3';
@@ -159,6 +162,9 @@ const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
   marginLeftChars: 0,
   marginRightChars: 0,
   endFeedLines: 0,
+  receiptPrintableWidthMm: 0,
+  receiptLeftMarginMm: 0,
+  receiptBodyFontPx: 0,
 };
 
 function money(v: string | number): string {
@@ -616,10 +622,7 @@ function buildReceiptHeaderHtml(inv: PrintableInvoice, settings: ReceiptSettings
 }
 
 export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: ThermalLayout, settings: ReceiptSettings = DEFAULT_RECEIPT_SETTINGS): string {
-  const paperMm = (settings.columns ?? 32) >= 48 ? 80 : 58;
-  const contentMm = paperMm === 80 ? 72 : 50;
-  const sideMarginMm = paperMm === 80 ? 4 : 3;
-  const monoFontPx = paperMm === 80 ? 9 : 9.5;
+  const { paperMm, contentMm, sideMarginMm, monoFontPx } = receiptHtmlMetrics(settings);
   const text = buildThermalReceipt(invoice, layout, settings);
   const blockSettings = { ...settings, endFeedLines: 0 };
   if (layout !== 'receipt') {
@@ -668,6 +671,57 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
     .cut{margin-top:1mm;border-top:1px dashed #000;text-align:center;font:9px/1.2 Arial,sans-serif}
     .feed{height:${feedMm}mm}
   </style></head><body><div class="receipt">${htmlBlocks.join('')}<div class="cut">CUT HERE</div><div class="feed"></div></div></body></html>`;
+}
+
+function receiptHtmlMetrics(settings: ReceiptSettings): { paperMm: number; contentMm: number; sideMarginMm: number; monoFontPx: number } {
+  const paperMm = (settings.columns ?? 32) >= 48 ? 80 : 58;
+  const fallbackContentMm = paperMm === 80 ? 72 : 50;
+  const fallbackSideMarginMm = paperMm === 80 ? 4 : 3;
+  const fallbackFontPx = paperMm === 80 ? 9 : 9.5;
+  const contentMm = Math.max(36, Math.min(paperMm, Number(settings.receiptPrintableWidthMm) || fallbackContentMm));
+  const sideMarginMm = Math.max(0, Math.min(12, Number(settings.receiptLeftMarginMm) || fallbackSideMarginMm));
+  const monoFontPx = Math.max(7, Math.min(12, Number(settings.receiptBodyFontPx) || fallbackFontPx));
+  return { paperMm, contentMm, sideMarginMm, monoFontPx };
+}
+
+export function buildReceiptCalibrationHtml(settings: ReceiptSettings = DEFAULT_RECEIPT_SETTINGS): string {
+  const { paperMm, contentMm, sideMarginMm, monoFontPx } = receiptHtmlMetrics(settings);
+  const columns = receiptContentColumns(settings);
+  const line = divider(columns);
+  const amountWidth = 14;
+  const labelWidth = Math.max(5, columns - 1 - amountWidth);
+  const rows = [
+    line,
+    receiptCenter('RASETU RECEIPT TEST', columns),
+    line,
+    `Paper: ${paperMm === 80 ? '80mm / 3 inch' : '58mm / 2 inch'}`,
+    `HTML width: ${contentMm}mm  Left: ${sideMarginMm}mm`,
+    `Font: ${monoFontPx}px  Columns: ${columns}`,
+    line,
+    'Sample Item Saree M/Red',
+    'HSN 6109 GST 12%',
+    '  Qty 1 x 1,249.11 = 1,399.00',
+    line,
+    'Items: 1  Qty: 1',
+    row([{ text: 'Taxable', width: labelWidth }, { text: '1,249.11', width: amountWidth, align: 'r' }]),
+    row([{ text: 'CGST', width: labelWidth }, { text: '74.94', width: amountWidth, align: 'r' }]),
+    row([{ text: 'SGST', width: labelWidth }, { text: '74.95', width: amountWidth, align: 'r' }]),
+    line,
+    row([{ text: 'TOTAL', width: labelWidth }, { text: 'Rs.1,399.00', width: amountWidth, align: 'r' }]),
+    'Rupees One Thousand Three Hundred Ninety Nine Only',
+    line,
+    'GST%   Taxable     CGST     SGST',
+    '12%    1249.11    74.95    74.95',
+    line,
+  ].join('\n');
+  return `<!doctype html><html><head><meta charset="utf-8" /><style>
+    @page{size:${paperMm}mm auto;margin:0}
+    *{box-sizing:border-box}
+    body{margin:0;background:#fff;color:#000}
+    .receipt{width:${contentMm}mm;margin:0 0 0 ${sideMarginMm}mm;padding:1mm 0 0;overflow:hidden}
+    pre{margin:0;text-align:left;font:${monoFontPx}px/1.22 "Courier New",Consolas,monospace;white-space:pre-wrap}
+    .cut{margin-top:1mm;border-top:1px dashed #000;text-align:center;font:9px/1.2 Arial,sans-serif}
+  </style></head><body><div class="receipt"><pre>${escapeHtml(rows)}</pre><div class="cut">CUT HERE</div></div></body></html>`;
 }
 
 /** Guards the Electron-only bridge (electron/preload.ts) the same way LabelsPage does. */

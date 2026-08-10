@@ -21,7 +21,7 @@ import { apiRequest, setUnauthorizedHandler, setDriveDisconnectedHandler } from 
 import { activateLicense, getStartupLicenseStatus, revalidateLicenseInBackground, getOfflineGraceInfo, LicenseError, type StartupLicenseStatus } from './lib/license';
 import { theme } from './lib/theme';
 import type { PrinterConfig, ThermalLayout, A4Layout } from './lib/rasetu-bridge';
-import type { ReceiptSettings } from './lib/invoicePrint';
+import { buildReceiptCalibrationHtml, type ReceiptSettings } from './lib/invoicePrint';
 import { BRAND_LOGO_DARK } from './lib/assets';
 
 const { color } = theme;
@@ -426,7 +426,7 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
 
   const numLabel = (key: keyof PrinterConfig['label'], fallback = 0) => Number(config?.label[key] ?? fallback);
 
-  function patchReceiptPaper(value: Partial<Pick<ReceiptSettings, 'columns' | 'marginLeftChars' | 'marginRightChars' | 'endFeedLines'>>) {
+  function patchReceiptPaper(value: Partial<Pick<ReceiptSettings, 'columns' | 'marginLeftChars' | 'marginRightChars' | 'endFeedLines' | 'receiptPrintableWidthMm' | 'receiptLeftMarginMm' | 'receiptBodyFontPx'>>) {
     setReceiptSettings((prev) => (prev ? { ...prev, ...value } : prev));
   }
 
@@ -457,9 +457,8 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       if (role === 'receipt' && receiptSettings) {
-        const result = await window.rasetu.printer.printRaw('receipt', buildReceiptCalibrationText(receiptSettings));
-        if (!result.success) throw new Error(result.error ?? result.message);
-        setStatus(result.message || 'Receipt calibration test sent.');
+        await window.rasetu.printer.printA4(buildReceiptCalibrationHtml(receiptSettings), config?.receipt.printerName ?? '', true);
+        setStatus('Receipt calibration test sent.');
         return;
       }
       const result = (await window.rasetu.printer.printTest(role)) as { message?: string; success?: boolean };
@@ -544,12 +543,29 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
                       <input type="number" min={0} max={5} value={receiptSettings.endFeedLines ?? 0} onChange={(e) => patchReceiptPaper({ endFeedLines: Number(e.target.value) || 0 })} style={pdInput} />
                     </label>
                   </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                    <label style={pdLabel}>
+                      Print width (mm)
+                      <input type="number" min={0} max={90} step="0.5" value={receiptSettings.receiptPrintableWidthMm ?? 0} placeholder={receiptSettings.columns === 48 ? '72' : '50'} onChange={(e) => patchReceiptPaper({ receiptPrintableWidthMm: Number(e.target.value) || 0 })} style={pdInput} />
+                    </label>
+                    <label style={pdLabel}>
+                      Left margin (mm)
+                      <input type="number" min={0} max={12} step="0.5" value={receiptSettings.receiptLeftMarginMm ?? 0} placeholder={receiptSettings.columns === 48 ? '4' : '3'} onChange={(e) => patchReceiptPaper({ receiptLeftMarginMm: Number(e.target.value) || 0 })} style={pdInput} />
+                    </label>
+                    <label style={pdLabel}>
+                      Body font (px)
+                      <input type="number" min={0} max={12} step="0.5" value={receiptSettings.receiptBodyFontPx ?? 0} placeholder={receiptSettings.columns === 48 ? '9' : '9.5'} onChange={(e) => patchReceiptPaper({ receiptBodyFontPx: Number(e.target.value) || 0 })} style={pdInput} />
+                    </label>
+                  </div>
+                  <div style={{ background: color.paper, border: `1px solid ${color.lineSoft}`, borderRadius: theme.radiusSm, padding: 8, fontSize: 11.5, color: color.inkSoft, lineHeight: 1.4, marginBottom: 10 }}>
+                    Print the HTML calibration test after changing width/margin/font. If left text cuts, increase left margin. If amounts wrap or cut, reduce print width or font size.
+                  </div>
                 </>
               )}
               <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                 <button onClick={() => void saveRole('receipt')} disabled={saving === 'receipt'} style={pdSaveBtn}>{saving === 'receipt' ? 'Saving…' : 'Save'}</button>
                 {receiptSettings && <button onClick={() => void saveReceiptPaper()} disabled={saving === 'receiptPaper'} style={pdSaveBtn}>{saving === 'receiptPaper' ? 'Saving...' : 'Save Paper'}</button>}
-                <button onClick={() => void printTest('receipt')} style={pdTestBtn}>Print Width Test</button>
+                <button onClick={() => void printTest('receipt')} style={pdTestBtn}>Print HTML Test</button>
               </div>
             </div>
 
@@ -629,33 +645,6 @@ const pdSaveBtn: React.CSSProperties = { padding: '9px 16px', background: color.
 const pdTestBtn: React.CSSProperties = { padding: '9px 16px', background: color.ledger, color: '#fff', border: 'none', borderRadius: theme.radiusSm, cursor: 'pointer', fontSize: 13 };
 const pdLabel: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: color.inkSoft };
 const pdInput: React.CSSProperties = { padding: 7, border: `1px solid ${color.line}`, borderRadius: theme.radiusSm, fontSize: 13, width: 90 };
-
-function buildReceiptCalibrationText(settings: ReceiptSettings): string {
-  const columns = Math.max(20, Math.min(64, Number(settings.columns) || 32));
-  const left = Math.max(0, Math.min(12, Number(settings.marginLeftChars) || 0));
-  const right = Math.max(0, Math.min(12, Number(settings.marginRightChars) || 0));
-  const feed = Math.max(0, Math.min(5, Number(settings.endFeedLines) || 0));
-  const contentWidth = Math.max(8, columns - left - right);
-  const pad = ' '.repeat(left);
-  const line = '-'.repeat(contentWidth);
-  const ruler = Array.from({ length: contentWidth }, (_, i) => (i + 1) % 10 === 0 ? String(Math.floor((i + 1) / 10) % 10) : String((i + 1) % 10)).join('');
-  const center = (text: string) => text.length >= contentWidth ? text.slice(0, contentWidth) : `${' '.repeat(Math.floor((contentWidth - text.length) / 2))}${text}`;
-
-  return [
-    pad + line,
-    pad + center('RASETU RECEIPT TEST'),
-    pad + line,
-    pad + `Paper: ${columns === 48 ? '80mm / 3 inch' : '58mm / 2 inch'}`.slice(0, contentWidth),
-    pad + `Width: ${columns} cols  L:${left} R:${right}`.slice(0, contentWidth),
-    pad + `End feed lines: ${feed}`.slice(0, contentWidth),
-    pad + ruler,
-    pad + line,
-    pad + 'LEFT'.padEnd(contentWidth - 5, ' ') + 'RIGHT',
-    pad + center('CENTER CHECK'),
-    pad + line,
-    ...Array.from({ length: feed }, () => ''),
-  ].join('\n');
-}
 
 function AppShell() {
   const { session, setSession } = useSession();

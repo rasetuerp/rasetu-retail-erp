@@ -47,6 +47,9 @@ const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
   marginLeftChars: 0,
   marginRightChars: 0,
   endFeedLines: 0,
+  receiptPrintableWidthMm: 0,
+  receiptLeftMarginMm: 0,
+  receiptBodyFontPx: 0,
 };
 const STATUS_TABS: Array<{ value: InvoiceStatus | 'ALL'; label: string }> = [
   { value: 'POSTED', label: 'Posted' },
