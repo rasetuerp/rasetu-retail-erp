@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Plus, Minus, X, User, Barcode, Trash2 } from 'lucide-react';
 import { apiRequest, ApiError } from '../../lib/api';
 import { useSession } from '../../lib/session';
-import { printThermalReceipt, printA4Invoice, buildThermalReceipt, buildA4Html, type PrintableInvoice, type ThermalLayout, type A4Layout, type ReceiptSettings, DEFAULT_RECEIPT_SECTIONS } from '../../lib/invoicePrint';
+import { printThermalReceipt, printA4Invoice, buildThermalReceipt, buildThermalReceiptHtml, buildA4Html, type PrintableInvoice, type ThermalLayout, type A4Layout, type ReceiptSettings, DEFAULT_RECEIPT_SECTIONS } from '../../lib/invoicePrint';
 import { previewInvoiceTotals, type SlabRule } from '../../lib/gstPreview';
 import { theme, statusColor } from '../../lib/theme';
 import { CategoryPicker, type CategoryEntry } from '../CategoryPicker';
@@ -183,6 +183,8 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
   const [printableInvoice, setPrintableInvoice] = useState<PrintableInvoice | null>(null);
   const [thermalLayout, setThermalLayout] = useState<ThermalLayout>('receipt');
   const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>({
+    receiptLogoImage: '',
+    receiptLogoWidthMm: 18,
     shopNameText: '',
     shopNameFontSize: 16,
     localShopNameText: '',
@@ -193,7 +195,7 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
     headerLine2FontSize: 10,
     headerLine3Text: '',
     headerLine3FontSize: 10,
-    headerOrder: ['shopName', 'localShopName', 'headerLine1', 'headerLine2', 'headerLine3'],
+    headerOrder: ['logo', 'shopName', 'localShopName', 'headerLine1', 'headerLine2', 'headerLine3'],
     exchangePolicyText: '',
     footerText: '',
     customMessageText: '',
@@ -1331,9 +1333,13 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
                 </div>
                 <div style={{ flex: 1, overflow: 'auto', padding: previewMode === 'thermal' ? 16 : 0, background: previewMode === 'thermal' ? color.paper : '#fff' }}>
                   {previewMode === 'thermal' ? (
-                    <pre style={{ fontFamily: theme.mono, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0, background: '#fff', padding: 12, borderRadius: theme.radiusSm, border: `1px solid ${color.line}` }}>
-                      {buildThermalReceipt(printableInvoice, thermalLayout, receiptSettings)}
-                    </pre>
+                    thermalLayout === 'receipt' ? (
+                      <iframe title="Receipt preview" srcDoc={buildThermalReceiptHtml(printableInvoice, thermalLayout, receiptSettings)} style={{ width: '100%', height: '70vh', border: `1px solid ${color.line}`, borderRadius: theme.radiusSm, background: '#fff' }} />
+                    ) : (
+                      <pre style={{ fontFamily: theme.mono, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0, background: '#fff', padding: 12, borderRadius: theme.radiusSm, border: `1px solid ${color.line}` }}>
+                        {buildThermalReceipt(printableInvoice, thermalLayout, receiptSettings)}
+                      </pre>
+                    )
                   ) : (
                     <iframe title="Invoice preview" srcDoc={buildA4Html(printableInvoice, a4Layout, receiptSettings)} style={{ width: '100%', height: '70vh', border: 'none' }} />
                   )}

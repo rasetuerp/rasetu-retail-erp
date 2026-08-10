@@ -343,5 +343,82 @@ itemsRouter.patch(
   })
 );
 
+itemsRouter.delete(
+  '/:id/safe',
+  requireRole('ADMIN', 'SUPER_ADMIN'),
+  asyncHandler(async (req, res) => {
+    const prisma = requireCompanyDb(req);
+    const existing = await prisma.item.findUnique({
+      where: { id: req.params.id },
+      include: {
+        stockMovements: true,
+        _count: {
+          select: {
+            invoiceItems: true,
+            purchaseItems: true,
+            creditNoteItems: true,
+            debitNoteItems: true,
+          },
+        },
+      },
+    });
+    if (!existing || existing.companyId !== req.params.companyId) throw new HttpError(404, 'Item not found');
+
+    const latest = await prisma.item.findFirst({
+      where: { companyId: req.params.companyId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    const hasDocumentRefs =
+      existing._count.invoiceItems > 0 ||
+      existing._count.purchaseItems > 0 ||
+      existing._count.creditNoteItems > 0 ||
+      existing._count.debitNoteItems > 0;
+    const onlyOpeningStock = existing.stockMovements.every((movement) => movement.type === 'OPENING' && !movement.refId);
+
+    if (latest?.id === existing.id && !hasDocumentRefs && onlyOpeningStock) {
+      await prisma.$transaction(async (tx) => {
+        await tx.stockMovement.deleteMany({ where: { itemId: existing.id } });
+        await tx.item.delete({ where: { id: existing.id } });
+      });
+      await recordMutation(prisma, {
+        userId: req.user?.id,
+        entity: 'Item',
+        entityId: existing.id,
+        action: 'DELETE',
+        oldValue: existing,
+        tableName: 'item',
+        syncAction: 'DELETE',
+        payload: { id: existing.id },
+      });
+      res.json({ mode: 'deleted', item: { id: existing.id, sku: existing.sku } });
+      return;
+    }
+
+    const cancelled = await prisma.item.update({
+      where: { id: existing.id },
+      data: { isActive: false },
+    });
+    await recordMutation(prisma, {
+      userId: req.user?.id,
+      entity: 'Item',
+      entityId: cancelled.id,
+      action: 'CANCEL',
+      oldValue: existing,
+      newValue: cancelled,
+      tableName: 'item',
+      syncAction: 'UPDATE',
+      payload: cancelled,
+    });
+    res.json({
+      mode: 'cancelled',
+      item: cancelled,
+      message: hasDocumentRefs
+        ? 'Item has bill/purchase history, so it was cancelled instead of deleted.'
+        : 'Only the newest unused item can be deleted. This item was cancelled instead.',
+    });
+  })
+);
+
 // TODO (Day 2): POST /import for Excel import (xlsx dep already in
 // backend/package.json), soft-delete via isActive=false only.

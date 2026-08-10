@@ -318,7 +318,13 @@ export class TscPrinterDriver {
       if (element.type === 'image') {
         if (!element.bitmap) continue;
         const { heightDots, bytesPerRow, hex } = element.bitmap;
-        lines.push(`BITMAP ${x},${y},${bytesPerRow},${heightDots},0,${hex}`);
+        const rowHexChars = bytesPerRow * 2;
+        const rowsPerBand = 16;
+        for (let row = 0; row < heightDots; row += rowsPerBand) {
+          const bandRows = Math.min(rowsPerBand, heightDots - row);
+          const bandHex = hex.slice(row * rowHexChars, (row + bandRows) * rowHexChars);
+          lines.push(`BITMAP ${x},${y + row},${bytesPerRow},${bandRows},0,${bandHex}`);
+        }
         continue;
       }
 

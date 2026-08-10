@@ -92,6 +92,8 @@ export const DEFAULT_RECEIPT_SECTIONS: ReceiptSectionConfig[] = (Object.keys(REC
 // Round 6 — shop-configurable text shown on the thermal receipt footer;
 // mirrors backend/src/routes/invoices.ts's receiptSettingsSchema defaults.
 export type ReceiptSettings = {
+  receiptLogoImage: string;
+  receiptLogoWidthMm: number;
   shopNameText: string;
   shopNameFontSize: number;
   localShopNameText: string;
@@ -115,17 +117,20 @@ export type ReceiptSettings = {
   endFeedLines: number;
 };
 
-export type ReceiptHeaderKey = 'shopName' | 'localShopName' | 'headerLine1' | 'headerLine2' | 'headerLine3';
+export type ReceiptHeaderKey = 'logo' | 'shopName' | 'localShopName' | 'headerLine1' | 'headerLine2' | 'headerLine3';
 export const RECEIPT_HEADER_LABELS: Record<ReceiptHeaderKey, string> = {
+  logo: 'Shop logo',
   shopName: 'Shop name',
   localShopName: 'Local language shop name',
   headerLine1: 'Header line 1',
   headerLine2: 'Business details',
   headerLine3: 'Header line 3',
 };
-export const DEFAULT_RECEIPT_HEADER_ORDER: ReceiptHeaderKey[] = ['shopName', 'localShopName', 'headerLine1', 'headerLine2', 'headerLine3'];
+export const DEFAULT_RECEIPT_HEADER_ORDER: ReceiptHeaderKey[] = ['logo', 'shopName', 'localShopName', 'headerLine1', 'headerLine2', 'headerLine3'];
 
 const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
+  receiptLogoImage: '',
+  receiptLogoWidthMm: 18,
   shopNameText: '',
   shopNameFontSize: 16,
   localShopNameText: '',
@@ -308,6 +313,7 @@ function sectionHeader(inv: PrintableInvoice, settings: ReceiptSettings): string
   const w = settings.columns;
   const lines: string[] = [];
   const headerText: Record<ReceiptHeaderKey, string> = {
+    logo: '',
     shopName: receiptHeaderText(settings.shopNameText || company?.name || 'RaSetu Retail', settings.shopNameFontSize),
     localShopName: receiptHeaderText(settings.localShopNameText, settings.localShopNameFontSize),
     headerLine1: receiptHeaderText(settings.headerLine1Text, settings.headerLine1FontSize),
@@ -558,6 +564,110 @@ export function buildThermalReceipt(invoice: PrintableInvoice, layout: ThermalLa
   return applyReceiptPaper(THERMAL_BUILDERS[layout](invoice, effectiveSettings), settings);
 }
 
+function enabledReceiptSections(settings: ReceiptSettings): ReceiptSectionKey[] {
+  const base = settings.sections?.length ? settings.sections : DEFAULT_RECEIPT_SECTIONS;
+  const missing = (Object.keys(SECTION_BUILDERS) as ReceiptSectionKey[]).filter((k) => !base.some((s) => s.key === k));
+  const configured = missing.length
+    ? [...base, ...missing.map((key, i) => ({ key, enabled: true, order: base.length + i }))]
+    : base;
+  return [...configured]
+    .sort((a, b) => a.order - b.order)
+    .filter((s) => s.enabled || LOCKED_RECEIPT_SECTIONS.includes(s.key))
+    .map((s) => s.key);
+}
+
+function headerTextForHtml(inv: PrintableInvoice, settings: ReceiptSettings): Record<ReceiptHeaderKey, { text: string; fontSize: number }> {
+  const company = inv.company;
+  return {
+    logo: { text: '', fontSize: 0 },
+    shopName: {
+      text: receiptHeaderText(settings.shopNameText || company?.name || 'RaSetu Retail', settings.shopNameFontSize),
+      fontSize: settings.shopNameFontSize,
+    },
+    localShopName: {
+      text: receiptHeaderText(settings.localShopNameText, settings.localShopNameFontSize),
+      fontSize: settings.localShopNameFontSize,
+    },
+    headerLine1: { text: receiptHeaderText(settings.headerLine1Text, settings.headerLine1FontSize), fontSize: settings.headerLine1FontSize },
+    headerLine2: { text: receiptHeaderText(settings.headerLine2Text, settings.headerLine2FontSize), fontSize: settings.headerLine2FontSize },
+    headerLine3: { text: receiptHeaderText(settings.headerLine3Text, settings.headerLine3FontSize), fontSize: settings.headerLine3FontSize },
+  };
+}
+
+function buildReceiptHeaderHtml(inv: PrintableInvoice, settings: ReceiptSettings): string {
+  const headerText = headerTextForHtml(inv, settings);
+  const ordered = orderedReceiptHeaderKeys(settings);
+  const parts: string[] = [];
+  for (const key of ordered) {
+    if (key === 'logo') {
+      if (!settings.receiptLogoImage) continue;
+      const logoWidth = Math.max(8, Math.min(72, settings.receiptLogoWidthMm || 18));
+      parts.push(`<img class="receipt-logo" src="${escapeHtml(settings.receiptLogoImage)}" style="width:${logoWidth}mm" />`);
+      continue;
+    }
+    const def = headerText[key];
+    if (!def.text) continue;
+    for (const line of def.text.split('\n').filter(Boolean)) {
+      const size = Math.max(8, Math.min(32, def.fontSize || 10));
+      parts.push(`<div class="receipt-header-line" style="font-size:${size}px">${escapeHtml(line)}</div>`);
+    }
+  }
+  return parts.join('');
+}
+
+export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: ThermalLayout, settings: ReceiptSettings = DEFAULT_RECEIPT_SETTINGS): string {
+  const paperMm = (settings.columns ?? 32) >= 48 ? 80 : 58;
+  const contentMm = paperMm === 80 ? 76 : 54;
+  const text = buildThermalReceipt(invoice, layout, settings);
+  const blockSettings = { ...settings, endFeedLines: 0 };
+  if (layout !== 'receipt') {
+    return `<!doctype html><html><head><meta charset="utf-8" /><style>
+      @page{size:${paperMm}mm auto;margin:0}
+      body{margin:0;background:#fff;color:#000}
+      pre{box-sizing:border-box;width:${contentMm}mm;margin:0;padding:1mm 1.5mm 0;font:11px/1.22 Consolas,"Courier New",monospace;white-space:pre-wrap}
+      .cut{width:${contentMm}mm;margin:1mm 1.5mm 0;border-top:1px dashed #000;text-align:center;font:9px/1.2 Arial,sans-serif}
+    </style></head><body><pre>${escapeHtml(text)}</pre><div class="cut">CUT HERE</div></body></html>`;
+  }
+
+  const effectiveSettings = { ...settings, columns: receiptContentColumns(settings) };
+  const htmlBlocks: string[] = [];
+  for (const key of enabledReceiptSections(effectiveSettings)) {
+    if (key === 'header') {
+      const company = invoice.company;
+      htmlBlocks.push(`<div class="header">${buildReceiptHeaderHtml(invoice, settings)}</div>`);
+      const companyLines = [
+        company?.address ? receiptCenter(company.address, effectiveSettings.columns) : '',
+        company?.phone ? receiptCenter(`Ph: ${company.phone}`, effectiveSettings.columns) : '',
+        company?.gstin ? receiptCenter(`GSTIN: ${company.gstin}`, effectiveSettings.columns) : '',
+        divider(effectiveSettings.columns),
+        receiptCenter('TAX INVOICE', effectiveSettings.columns),
+        divider(effectiveSettings.columns),
+        `Bill: ${invoice.number}`,
+        new Date(invoice.date).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }),
+      ].filter(Boolean);
+      htmlBlocks.push(`<pre>${escapeHtml(applyReceiptPaper(companyLines.join('\n'), blockSettings))}</pre>`);
+      continue;
+    }
+    const def = SECTION_BUILDERS[key];
+    const lines = def.build(invoice, effectiveSettings);
+    if (def.dividerAfter) lines.push(divider(effectiveSettings.columns));
+    if (lines.length) htmlBlocks.push(`<pre>${escapeHtml(applyReceiptPaper(lines.join('\n'), blockSettings))}</pre>`);
+  }
+  const feedMm = Math.max(0, Math.min(5, Math.floor(settings.endFeedLines ?? 0))) * 2.8;
+  return `<!doctype html><html><head><meta charset="utf-8" /><style>
+    @page{size:${paperMm}mm auto;margin:0}
+    *{box-sizing:border-box}
+    body{margin:0;background:#fff;color:#000}
+    .receipt{width:${contentMm}mm;margin:0;padding:1mm 1.5mm 0;text-align:center}
+    .header{font-family:"Nirmala UI","Noto Sans Kannada",Arial,sans-serif;line-height:1.18;text-align:center}
+    .receipt-header-line{font-weight:600;white-space:pre-wrap;overflow-wrap:anywhere}
+    .receipt-logo{display:block;height:auto;object-fit:contain;margin:0 auto .8mm;image-rendering:auto}
+    pre{margin:0;text-align:left;font:11px/1.22 Consolas,"Courier New",monospace;white-space:pre-wrap}
+    .cut{margin-top:1mm;border-top:1px dashed #000;text-align:center;font:9px/1.2 Arial,sans-serif}
+    .feed{height:${feedMm}mm}
+  </style></head><body><div class="receipt">${htmlBlocks.join('')}<div class="cut">CUT HERE</div><div class="feed"></div></div></body></html>`;
+}
+
 /** Guards the Electron-only bridge (electron/preload.ts) the same way LabelsPage does. */
 export async function printThermalReceipt(
   invoice: PrintableInvoice,
@@ -565,9 +675,30 @@ export async function printThermalReceipt(
   settings: ReceiptSettings = DEFAULT_RECEIPT_SETTINGS
 ): Promise<{ printed: boolean; message: string }> {
   const commands = buildThermalReceipt(invoice, layout, settings);
-  const bridge = (window as unknown as { rasetu?: { printer: { printRaw: (p: string, c: string) => Promise<{ success: boolean; message: string }> } } }).rasetu;
+  const bridge = (window as unknown as {
+    rasetu?: {
+      printer: {
+        getConfig?: () => Promise<{ receipt: { printerName: string } }>;
+        printA4?: (html: string, printerName: string, silent: boolean) => Promise<{ success: boolean }>;
+        printRaw: (p: string, c: string) => Promise<{ success: boolean; message: string }>;
+      };
+    };
+  }).rasetu;
   if (!bridge) {
     return { printed: false, message: 'Printing is only available in the desktop app - this preview runs in a plain browser tab.' };
+  }
+  if (layout === 'receipt' && bridge.printer.getConfig && bridge.printer.printA4) {
+    try {
+      const config = await bridge.printer.getConfig();
+      await bridge.printer.printA4(buildThermalReceiptHtml(invoice, layout, settings), config.receipt?.printerName ?? '', true);
+      return { printed: true, message: 'Receipt sent to printer.' };
+    } catch (err) {
+      const result = await bridge.printer.printRaw('default', commands);
+      return {
+        printed: result.success,
+        message: result.success ? 'Receipt sent with text fallback. Logo/local-language printing needs the Windows printer driver path.' : (err instanceof Error ? err.message : result.message),
+      };
+    }
   }
   const result = await bridge.printer.printRaw('default', commands);
   return { printed: result.success, message: result.message };

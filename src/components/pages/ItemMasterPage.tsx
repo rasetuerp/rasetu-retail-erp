@@ -103,6 +103,7 @@ export function ItemMasterPage() {
   const [submitting, setSubmitting] = useState(false);
   const [adjustingItemId, setAdjustingItemId] = useState<string | null>(null);
   const [adjustError, setAdjustError] = useState<string | null>(null);
+  const [removingItemId, setRemovingItemId] = useState<string | null>(null);
   const adjustQtyRef = useRef<HTMLInputElement>(null);
   const adjustTypeRef = useRef<HTMLSelectElement>(null);
   const adjustReasonRef = useRef<HTMLInputElement>(null);
@@ -350,6 +351,26 @@ export function ItemMasterPage() {
     }
   }
 
+  async function handleRemoveItem(item: Item) {
+    if (!session) return;
+    const ok = window.confirm(`Remove ${item.sku} from active stock?\n\nNewest unused item will be deleted. Older or used items will be cancelled and hidden so old bills stay safe.`);
+    if (!ok) return;
+    setRemovingItemId(item.id);
+    setError(null);
+    try {
+      const res = await apiRequest<{ mode: 'deleted' | 'cancelled'; message?: string }>(`/companies/${session.companyId}/items/${item.id}/safe`, {
+        method: 'DELETE',
+        token: session.token,
+      });
+      await loadItems();
+      if (res.message) setError(res.message);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not remove item');
+    } finally {
+      setRemovingItemId(null);
+    }
+  }
+
   const totalItems = items.length;
   const availableItems = items.filter((i) => Number(i.stockQty) > 0).length;
   const lowStockCount = items.filter((i) => Number(i.stockQty) <= Number(i.minStock)).length;
@@ -581,6 +602,13 @@ export function ItemMasterPage() {
                         style={{ padding: '4px 10px', background: 'transparent', border: `1px solid ${color.line}`, borderRadius: theme.radiusSm, cursor: 'pointer', fontSize: 12, color: color.inkSoft }}
                       >
                         Edit
+                      </button>
+                      <button
+                        onClick={() => void handleRemoveItem(item)}
+                        disabled={removingItemId === item.id}
+                        style={{ padding: '4px 10px', background: 'transparent', border: `1px solid #fecaca`, borderRadius: theme.radiusSm, cursor: 'pointer', fontSize: 12, color: color.alert }}
+                      >
+                        {removingItemId === item.id ? 'Removing...' : 'Remove'}
                       </button>
                     </div>
                   </td>

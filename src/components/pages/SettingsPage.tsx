@@ -550,6 +550,8 @@ function CategoriesCard() {
 // order — a text-only analog of a section catalog, since true drag
 // positioning doesn't apply to a monospace receipt).
 type ReceiptSettings = {
+  receiptLogoImage: string;
+  receiptLogoWidthMm: number;
   shopNameText: string;
   shopNameFontSize: number;
   localShopNameText: string;
@@ -581,6 +583,8 @@ function ReceiptSettingsCard() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const shopNameRef = useRef<HTMLInputElement>(null);
+  const receiptLogoInputRef = useRef<HTMLInputElement>(null);
+  const receiptLogoWidthRef = useRef<HTMLInputElement>(null);
   const shopNameFontRef = useRef<HTMLInputElement>(null);
   const localShopNameRef = useRef<HTMLInputElement>(null);
   const localShopNameFontRef = useRef<HTMLInputElement>(null);
@@ -647,8 +651,29 @@ function ReceiptSettingsCard() {
     });
   }
 
+  function handleReceiptLogoUpload(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Choose an image file for the receipt logo.');
+      return;
+    }
+    if (file.size > 900000) {
+      setError('Receipt logo must be under 900 KB. Use a smaller PNG/JPG/WebP.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = String(reader.result || '');
+      setSettings((prev) => (prev ? { ...prev, receiptLogoImage: image } : prev));
+      setHeaderOrder((prev) => normalizeHeaderOrder(prev));
+      setError(null);
+    };
+    reader.onerror = () => setError('Could not read receipt logo image.');
+    reader.readAsDataURL(file);
+  }
+
   async function handleSave() {
-    if (!session) return;
+    if (!session || !settings) return;
     setError(null);
     setSaving(true);
     try {
@@ -666,6 +691,8 @@ function ReceiptSettingsCard() {
           headerLine2FontSize: Number(headerLine2FontRef.current?.value ?? 10),
           headerLine3Text: headerLine3Ref.current?.value ?? '',
           headerLine3FontSize: Number(headerLine3FontRef.current?.value ?? 10),
+          receiptLogoImage: settings.receiptLogoImage ?? '',
+          receiptLogoWidthMm: Number(receiptLogoWidthRef.current?.value ?? settings.receiptLogoWidthMm ?? 18),
           headerOrder,
           exchangePolicyText: exchangeRef.current?.value ?? '',
           footerText: footerRef.current?.value ?? '',
@@ -700,6 +727,38 @@ function ReceiptSettingsCard() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: color.paperRaised, border: `1px solid ${color.line}`, borderRadius: theme.radius, padding: 18, boxShadow: theme.shadowSm }}>
         <div style={groupHeadingStyle}>Receipt Shop Header</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto minmax(160px, 1fr) 110px', gap: 10, alignItems: 'end' }}>
+          <div style={{ width: 76, height: 54, border: `1px solid ${color.line}`, borderRadius: theme.radiusSm, background: color.paper, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            {settings.receiptLogoImage ? (
+              <img src={settings.receiptLogoImage} alt="Receipt logo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+            ) : (
+              <span style={{ fontSize: 11, color: color.inkFaint }}>No logo</span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              ref={receiptLogoInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/bmp"
+              hidden
+              onChange={(event) => {
+                handleReceiptLogoUpload(event.currentTarget.files?.[0]);
+                event.currentTarget.value = '';
+              }}
+            />
+            <button type="button" onClick={() => receiptLogoInputRef.current?.click()} style={reorderBtn}>Upload logo</button>
+            {settings.receiptLogoImage && (
+              <button type="button" onClick={() => setSettings((prev) => (prev ? { ...prev, receiptLogoImage: '' } : prev))} style={{ ...reorderBtn, color: color.alert, borderColor: '#fecaca' }}>
+                Remove
+              </button>
+            )}
+            <span style={{ fontSize: 11.5, color: color.inkFaint }}>Print order can move logo up/down below.</span>
+          </div>
+          <label style={labelStyle}>
+            Logo width (mm)
+            <input ref={receiptLogoWidthRef} key={`receipt-logo-width-${settings.receiptLogoWidthMm}`} type="number" min={8} max={72} defaultValue={settings.receiptLogoWidthMm ?? 18} style={{ ...inputStyle, width: 96 }} />
+          </label>
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) 90px', gap: 8 }}>
           <label style={labelStyle}>
             Shop name override
@@ -999,16 +1058,16 @@ function DataManagementCard() {
       </div>
 
       <div style={{ background: color.paperRaised, border: `1px solid ${color.line}`, borderRadius: theme.radius, padding: 18, boxShadow: theme.shadowSm }}>
-        <div style={groupHeadingStyle}>Delete Last Invoice</div>
+        <div style={groupHeadingStyle}>Delete Last Bill / Estimate</div>
         <p style={{ margin: '0 0 12px', color: color.inkSoft, fontSize: 12.5, lineHeight: 1.45 }}>
-          Only works when the last invoice has no payments, no returns, no later ledger activity, and is the latest issued number. Otherwise use cancel or sales return.
+          Only works for the newest saved bill or estimate when it has no linked payments, returns, later ledger activity, or later issued number. Otherwise use cancel or sales return.
         </p>
         <label style={labelStyle}>
           Type DELETE LAST INVOICE
           <input ref={deleteLastRef} style={inputStyle} placeholder="DELETE LAST INVOICE" />
         </label>
         <button onClick={() => void deleteLastInvoice()} disabled={working !== null || !summary?.lastInvoice} style={{ marginTop: 10, padding: '9px 16px', background: color.ledger, color: '#fff', border: 'none', borderRadius: theme.radiusSm, cursor: 'pointer', fontSize: 13.5, fontWeight: 700 }}>
-          {working === 'delete-last' ? 'Checking...' : 'Delete Last Invoice If Safe'}
+          {working === 'delete-last' ? 'Checking...' : 'Delete Last Bill / Estimate If Safe'}
         </button>
       </div>
     </div>

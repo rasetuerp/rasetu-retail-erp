@@ -343,7 +343,7 @@ ipcMain.handle('rt:printer-print-a4', async (_event, html: string, printerName: 
     await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     await new Promise<void>((resolve, reject) => {
       printWindow.webContents.print(
-        { silent, deviceName: printerName, printBackground: true },
+        { silent, deviceName: printerName || undefined, printBackground: true },
         (success, errorType) => {
           if (success) resolve();
           else reject(new Error(errorType || 'Print failed'));

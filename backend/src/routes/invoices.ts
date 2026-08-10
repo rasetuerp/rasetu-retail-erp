@@ -206,10 +206,12 @@ const RECEIPT_SECTION_KEYS = [
   'footer',
 ] as const;
 const DEFAULT_RECEIPT_SECTIONS = RECEIPT_SECTION_KEYS.map((key, order) => ({ key, enabled: true, order }));
-const RECEIPT_HEADER_KEYS = ['shopName', 'localShopName', 'headerLine1', 'headerLine2', 'headerLine3'] as const;
+const RECEIPT_HEADER_KEYS = ['logo', 'shopName', 'localShopName', 'headerLine1', 'headerLine2', 'headerLine3'] as const;
 const DEFAULT_RECEIPT_HEADER_ORDER = [...RECEIPT_HEADER_KEYS];
 
 const receiptSettingsSchema = z.object({
+  receiptLogoImage: z.string().max(900000).default(''),
+  receiptLogoWidthMm: z.number().min(8).max(72).default(18),
   shopNameText: z.string().default(''),
   shopNameFontSize: z.number().min(8).max(32).default(16),
   localShopNameText: z.string().default(''),
