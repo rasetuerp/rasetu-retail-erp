@@ -22,6 +22,7 @@ import { apiRequest, setUnauthorizedHandler, setDriveDisconnectedHandler } from 
 import { activateLicense, getStartupLicenseStatus, revalidateLicenseInBackground, getOfflineGraceInfo, LicenseError, type StartupLicenseStatus } from './lib/license';
 import { theme } from './lib/theme';
 import type { PrinterConfig, ThermalLayout, A4Layout } from './lib/rasetu-bridge';
+import type { ReceiptSettings } from './lib/invoicePrint';
 
 const { color } = theme;
 
@@ -397,11 +398,13 @@ function QuickNotepad({ session, onClose }: { session: NonNullable<ReturnType<ty
 // different physical printers), and had no effect at all on A4/A5 invoices
 // (those bypassed the printer bridge entirely) — see electron/printer-config.ts.
 function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
+  const { session } = useSession();
   const [config, setConfig] = useState<PrinterConfig | null>(null);
+  const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings | null>(null);
   const [printers, setPrinters] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [saving, setSaving] = useState<'receipt' | 'label' | 'invoice' | null>(null);
+  const [saving, setSaving] = useState<'receipt' | 'receiptPaper' | 'label' | 'invoice' | null>(null);
 
   useEffect(() => {
     if (!window.rasetu) {
@@ -410,7 +413,10 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
     }
     void window.rasetu.printer.getConfig().then(setConfig);
     void window.rasetu.printer.listPrinters().then((p) => setPrinters(p as string[]));
-  }, []);
+    if (session) {
+      void apiRequest<{ settings: ReceiptSettings }>(`/companies/${session.companyId}/invoices/receipt-settings`, { token: session.token }).then((res) => setReceiptSettings(res.settings));
+    }
+  }, [session]);
 
   function patch<K extends keyof PrinterConfig>(role: K, value: Partial<PrinterConfig[K]>) {
     setConfig((prev) => (prev ? { ...prev, [role]: { ...prev[role], ...value } } : prev));
@@ -421,6 +427,10 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
   }
 
   const numLabel = (key: keyof PrinterConfig['label'], fallback = 0) => Number(config?.label[key] ?? fallback);
+
+  function patchReceiptPaper(value: Partial<Pick<ReceiptSettings, 'columns' | 'marginLeftChars' | 'marginRightChars'>>) {
+    setReceiptSettings((prev) => (prev ? { ...prev, ...value } : prev));
+  }
 
   async function saveRole(role: 'receipt' | 'label' | 'invoice') {
     if (!window.rasetu || !config) return;
@@ -452,6 +462,26 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
       setStatus(result.message ?? (result.success ? 'Test sent.' : 'Test print failed.'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Test print failed.');
+    }
+  }
+
+  async function saveReceiptPaper() {
+    if (!session || !receiptSettings) return;
+    setSaving('receiptPaper');
+    setStatus(null);
+    setError(null);
+    try {
+      const res = await apiRequest<{ settings: ReceiptSettings }>(`/companies/${session.companyId}/invoices/receipt-settings`, {
+        method: 'PUT',
+        token: session.token,
+        body: receiptSettings,
+      });
+      setReceiptSettings(res.settings);
+      setStatus('Saved receipt paper width.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save receipt paper width.');
+    } finally {
+      setSaving(null);
     }
   }
 
@@ -487,8 +517,30 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
                   <option value="detailed">Detailed</option>
                 </select>
               </label>
+              {receiptSettings && (
+                <>
+                  <label style={pdLabelFull}>
+                    Paper width
+                    <select value={receiptSettings.columns} onChange={(e) => patchReceiptPaper({ columns: Number(e.target.value) })} style={pdSelect}>
+                      <option value={32}>58mm / 2 inch roll (32 columns)</option>
+                      <option value={48}>80mm / 3 inch roll (48 columns)</option>
+                    </select>
+                  </label>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                    <label style={pdLabel}>
+                      Left margin (chars)
+                      <input type="number" min={0} max={12} value={receiptSettings.marginLeftChars ?? 0} onChange={(e) => patchReceiptPaper({ marginLeftChars: Number(e.target.value) || 0 })} style={pdInput} />
+                    </label>
+                    <label style={pdLabel}>
+                      Right margin (chars)
+                      <input type="number" min={0} max={12} value={receiptSettings.marginRightChars ?? 0} onChange={(e) => patchReceiptPaper({ marginRightChars: Number(e.target.value) || 0 })} style={pdInput} />
+                    </label>
+                  </div>
+                </>
+              )}
               <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                 <button onClick={() => void saveRole('receipt')} disabled={saving === 'receipt'} style={pdSaveBtn}>{saving === 'receipt' ? 'Saving…' : 'Save'}</button>
+                {receiptSettings && <button onClick={() => void saveReceiptPaper()} disabled={saving === 'receiptPaper'} style={pdSaveBtn}>{saving === 'receiptPaper' ? 'Saving...' : 'Save Paper'}</button>}
                 <button onClick={() => void printTest('receipt')} style={pdTestBtn}>Print Test</button>
               </div>
             </div>
@@ -503,31 +555,20 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
                   {printers.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
               </label>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                <label style={pdLabel}>
-                  Label width (mm)
-                  <input type="number" value={numLabel('labelWidth')} onChange={(e) => fieldLabel('labelWidth', Number(e.target.value) || 0)} style={pdInput} />
-                </label>
-                <label style={pdLabel}>
-                  Label height (mm)
-                  <input type="number" value={numLabel('labelHeight')} onChange={(e) => fieldLabel('labelHeight', Number(e.target.value) || 0)} style={pdInput} />
-                </label>
+              <div style={{ background: color.paper, border: `1px solid ${color.lineSoft}`, borderRadius: theme.radiusSm, padding: 10, fontSize: 11.5, color: color.inkSoft, lineHeight: 1.45, marginBottom: 10 }}>
+                Label size and gap are taken from the selected Label Designer template, so the printed label uses the same width and height shown in Live Preview.
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
                 <label style={pdLabel}>
-                  Margin left (mm)
+                  Global X nudge (mm)
                   <input type="number" value={numLabel('marginLeft')} onChange={(e) => fieldLabel('marginLeft', Number(e.target.value) || 0)} style={pdInput} />
                 </label>
                 <label style={pdLabel}>
-                  Margin top (mm)
+                  Global Y nudge (mm)
                   <input type="number" value={numLabel('marginTop')} onChange={(e) => fieldLabel('marginTop', Number(e.target.value) || 0)} style={pdInput} />
                 </label>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                <label style={pdLabel}>
-                  Gap length (mm)
-                  <input type="number" value={numLabel('gapLength')} onChange={(e) => fieldLabel('gapLength', Number(e.target.value) || 0)} style={pdInput} />
-                </label>
                 <label style={pdLabel}>
                   Darkness (0-15)
                   <input type="number" min={0} max={15} value={numLabel('darknessFactor')} onChange={(e) => fieldLabel('darknessFactor', Math.max(0, Math.min(15, Number(e.target.value) || 0)))} style={pdInput} />

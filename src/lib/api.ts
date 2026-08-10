@@ -2,6 +2,7 @@
 // (docs/RULES.md #2's no-cross-page-imports rule targets pages).
 
 const BASE_URL = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_API_URL ?? 'http://localhost:4100';
+const REQUEST_TIMEOUT_MS = 30_000;
 
 export class ApiError extends Error {
   status: number;
@@ -41,8 +42,22 @@ export function setDriveDisconnectedHandler(handler: ((message: string) => void)
   onDriveDisconnected = handler;
 }
 
-export async function apiRequest<T = unknown>(path: string, options: RequestOptions = {}): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function send(path: string, options: RequestOptions): Promise<Response> {
+  return fetchWithTimeout(`${BASE_URL}${path}`, {
     method: options.method ?? 'GET',
     headers: {
       'Content-Type': 'application/json',
@@ -50,6 +65,20 @@ export async function apiRequest<T = unknown>(path: string, options: RequestOpti
     },
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
+}
+
+export async function apiRequest<T = unknown>(path: string, options: RequestOptions = {}): Promise<T> {
+  let res: Response;
+  try {
+    res = await send(path, options);
+  } catch (err) {
+    if ((options.method ?? 'GET') === 'GET') {
+      await wait(350);
+      res = await send(path, options);
+    } else {
+      throw err;
+    }
+  }
 
   const isJson = res.headers.get('content-type')?.includes('application/json');
   const payload = isJson ? await res.json() : undefined;

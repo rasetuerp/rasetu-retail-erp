@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, dialog } from 'electron';
-import electronUpdater from 'electron-updater';
+import electronUpdater, { type Logger } from 'electron-updater';
 const { autoUpdater } = electronUpdater;
 import nodeMachineId from 'node-machine-id';
 const { machineIdSync } = nodeMachineId;
@@ -20,20 +20,89 @@ const isDev = !app.isPackaged;
 let mainWindow: BrowserWindow | null = null;
 let backendProcess: ChildProcess | null = null;
 
+const SUPABASE_URL = 'https://doopelkfucwiogrylysj.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_Fp4R_QUz_d_Hzs0pBA2eKw_986nPQzz';
+
+function isBrokenPipeError(error: unknown) {
+  return error instanceof Error && 'code' in error && error.code === 'EPIPE';
+}
+
+function swallowBrokenPipe(error: unknown) {
+  if (!isBrokenPipeError(error)) throw error;
+}
+
+process.stdout?.on('error', swallowBrokenPipe);
+process.stderr?.on('error', swallowBrokenPipe);
+
+function mainLogPath() {
+  return path.join(app.getPath('userData'), 'main.log');
+}
+
+function writeMainLog(level: string, message?: unknown) {
+  try {
+    fs.mkdirSync(path.dirname(mainLogPath()), { recursive: true });
+    const text = message instanceof Error ? `${message.stack ?? message.message}` : typeof message === 'string' ? message : JSON.stringify(message);
+    fs.appendFileSync(mainLogPath(), `[${new Date().toISOString()}] [${level}] ${text ?? ''}\n`);
+  } catch {
+    // Logging must never crash the packaged desktop app.
+  }
+}
+
+const fileLogger: Logger = {
+  info: (message?: unknown) => writeMainLog('info', message),
+  warn: (message?: unknown) => writeMainLog('warn', message),
+  error: (message?: unknown) => writeMainLog('error', message),
+  debug: (message: string) => writeMainLog('debug', message),
+};
+
+autoUpdater.logger = fileLogger;
+
+function backendSecretPath() {
+  return path.join(app.getPath('userData'), 'backend-secret.key');
+}
+
+function readOrCreateBackendSecret() {
+  const secretPath = backendSecretPath();
+  try {
+    const existing = fs.readFileSync(secretPath, 'utf8').trim();
+    if (existing.length >= 32) return existing;
+  } catch {
+    // First run: create a per-install JWT signing secret below.
+  }
+
+  const secret = crypto.randomBytes(32).toString('hex');
+  fs.mkdirSync(path.dirname(secretPath), { recursive: true });
+  fs.writeFileSync(secretPath, secret, { mode: 0o600 });
+  return secret;
+}
+
 function startBackend() {
   const backendEntry = isDev
     ? path.join(process.cwd(), 'backend', 'dist', 'index.js')
-    : path.join(process.resourcesPath, 'backend', 'dist', 'index.js');
+    : path.join(process.resourcesPath, 'app.asar.unpacked', 'backend', 'dist', 'index.js');
+
+  const logPath = path.join(app.getPath('userData'), 'backend.log');
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const logFd = fs.openSync(logPath, 'a');
 
   backendProcess = spawn(process.execPath, [backendEntry], {
     // Round 4: one catalog DB + one file per company, rooted under the OS
     // per-user data directory rather than inside the app bundle (see
     // backend/src/db/company-registry.ts).
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', RASETU_DATA_DIR: app.getPath('userData') },
-    stdio: 'inherit',
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      RASETU_DATA_DIR: app.getPath('userData'),
+      JWT_SECRET: process.env.JWT_SECRET ?? readOrCreateBackendSecret(),
+      JWT_TTL_HOURS: process.env.JWT_TTL_HOURS ?? '12',
+      SUPABASE_URL: process.env.SUPABASE_URL ?? SUPABASE_URL,
+      SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY ?? SUPABASE_ANON_KEY,
+    },
+    stdio: ['ignore', logFd, logFd],
   });
 
   backendProcess.on('exit', (code) => {
+    fs.closeSync(logFd);
     mainWindow?.webContents.send('rt:backend-status', { running: false, code });
   });
 }
@@ -71,7 +140,13 @@ app.whenReady().then(() => {
   createWindow();
 
   if (!isDev) {
-    void autoUpdater.checkForUpdatesAndNotify();
+    void autoUpdater.checkForUpdatesAndNotify().catch((err: unknown) => {
+      writeMainLog('warn', err);
+      mainWindow?.webContents.send('rt:update-status', {
+        status: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 
   // Round 7 — background backup cycle (local + extra folders + opt-in R2)
@@ -118,15 +193,25 @@ ipcMain.handle('rt:backend-restart', () => {
   backendProcess?.kill();
   startBackend();
 });
-ipcMain.handle('rt:update-check', () => autoUpdater.checkForUpdates());
+ipcMain.handle('rt:update-check', async () => {
+  try {
+    return await autoUpdater.checkForUpdates();
+  } catch (err) {
+    writeMainLog('warn', err);
+    return {
+      updateInfo: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
 ipcMain.handle('rt:update-install', () => autoUpdater.quitAndInstall());
 ipcMain.handle('rt:get-machine-id', () => machineIdSync(true));
 
 // Must be kept in sync with src/lib/license.ts's identical constants — main.ts
 // needs its own copy for the background license-revalidation and R2-backup
 // calls below (Node/Electron main process, can't import renderer-side modules).
-const LICENSE_FUNCTIONS_URL = 'https://doopelkfucwiogrylysj.supabase.co/functions/v1';
-const LICENSE_ANON_KEY = 'sb_publishable_Fp4R_QUz_d_Hzs0pBA2eKw_986nPQzz';
+const LICENSE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
+const LICENSE_ANON_KEY = SUPABASE_ANON_KEY;
 
 // ---------- licensing (docs/COMMERCIAL.md, Round 4) ----------
 // One license per installed copy (machine), not per company — gates the
@@ -272,6 +357,13 @@ ipcMain.handle('rt:printer-print-a4', async (_event, html: string, printerName: 
 
 autoUpdater.on('update-available', () => mainWindow?.webContents.send('rt:update-status', { status: 'available' }));
 autoUpdater.on('update-downloaded', () => mainWindow?.webContents.send('rt:update-status', { status: 'downloaded' }));
+autoUpdater.on('error', (err) => {
+  writeMainLog('warn', err);
+  mainWindow?.webContents.send('rt:update-status', {
+    status: 'error',
+    message: err instanceof Error ? err.message : String(err),
+  });
+});
 
 // ---------- backups (Round 7) ----------
 // Electron owns SCHEDULED backups end-to-end, directly at the filesystem

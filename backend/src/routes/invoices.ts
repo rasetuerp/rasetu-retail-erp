@@ -224,6 +224,8 @@ const receiptSettingsSchema = z.object({
   // Round 17 — physical roll width in characters (58mm ≈ 32 cols, 80mm ≈ 48
   // cols at standard thermal font). Drives every thermal layout's formatting.
   columns: z.number().int().min(20).max(64).default(32),
+  marginLeftChars: z.number().int().min(0).max(12).default(0),
+  marginRightChars: z.number().int().min(0).max(12).default(0),
 });
 const DEFAULT_RECEIPT_SETTINGS = receiptSettingsSchema.parse({});
 

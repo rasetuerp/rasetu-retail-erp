@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 import { prisma } from '../db/catalog-client.js';
-import { setResolvedExternalDbPath, clearResolvedExternalDbPath, resetCompanyClient } from '../db/company-registry.js';
+import { setResolvedExternalDbPath, clearResolvedExternalDbPath, markKnownExternalCompany, resetCompanyClient } from '../db/company-registry.js';
 import { findDriveByVolumeId, type DriveInfo } from './drives.js';
 import { HttpError } from './http-error.js';
 
@@ -39,6 +39,7 @@ export type StorageAvailability = { available: true; drive: DriveInfo } | { avai
  */
 export async function resolveExternalCompanyPath(company: CompanyStorageRow): Promise<StorageAvailability> {
   if (company.storageType !== 'external') return { available: true, drive: null as unknown as DriveInfo };
+  markKnownExternalCompany(company.id);
   if (!company.volumeId || !company.dbDir) return { available: false, drive: null };
 
   const drive = await findDriveByVolumeId(company.volumeId);

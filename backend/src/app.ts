@@ -6,7 +6,7 @@ import { ZodError } from 'zod';
 
 import { HttpError } from './lib/http-error.js';
 import { BACKEND_ROOT } from './lib/backend-root.js';
-import { resetCompanyClient, clearResolvedExternalDbPath } from './db/company-registry.js';
+import { resetCompanyClient, clearResolvedExternalDbPath, isKnownExternalCompany } from './db/company-registry.js';
 import { healthRouter } from './routes/health.js';
 import { metaRouter } from './routes/meta.js';
 import { systemRouter } from './routes/system.js';
@@ -134,12 +134,10 @@ export function createApp() {
     // way even after the drive is reconnected and the process would need a
     // restart otherwise) and tell the frontend via a distinct code instead
     // of a generic 500 — see src/lib/api.ts's onDriveDisconnected handler.
-    if (isDriveDisconnectedError(e)) {
-      const companyId = (_req.params as { companyId?: string }).companyId;
-      if (companyId) {
-        void resetCompanyClient(companyId);
-        clearResolvedExternalDbPath(companyId);
-      }
+    const companyId = (_req.params as { companyId?: string }).companyId;
+    if (companyId && isKnownExternalCompany(companyId) && isDriveDisconnectedError(e)) {
+      void resetCompanyClient(companyId);
+      clearResolvedExternalDbPath(companyId);
       return res.status(503).json({
         error: "This company's data drive appears to be disconnected. Reconnect it and try again.",
         code: 'DRIVE_DISCONNECTED',

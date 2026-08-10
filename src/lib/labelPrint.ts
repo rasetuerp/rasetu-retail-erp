@@ -361,6 +361,7 @@ export async function buildPrinterTemplate(draft: LabelTemplateDto) {
     printerProfile: draft.printConfig.dpi === 300 ? 'tsc-ttp244-300' : 'tsc-ttp244-203',
     xOffsetMm: draft.printConfig.xOffsetMm,
     yOffsetMm: draft.printConfig.yOffsetMm,
+    gapMm: draft.printConfig.gapMm,
     darkness: draft.printConfig.darkness,
   };
 }

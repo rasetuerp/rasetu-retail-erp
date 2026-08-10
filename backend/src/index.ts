@@ -1,10 +1,11 @@
 import { createApp } from './app.js';
 import { env } from './config/env.js';
-import { prisma } from './db/catalog-client.js';
-import { disconnectAllCompanyClients } from './db/company-registry.js';
+import { configureCatalogClient, prisma } from './db/catalog-client.js';
+import { disconnectAllCompanyClients, startCompanyClientIdleSweeper } from './db/company-registry.js';
 import { startSyncWorker } from './lib/sync-worker.js';
 
 let shuttingDownAfterFatal = false;
+const backgroundTimers: NodeJS.Timeout[] = [];
 
 function logFatalBackendError(kind: string, error: unknown) {
   const e = error instanceof Error ? error : new Error(String(error));
@@ -20,6 +21,7 @@ async function exitAfterFatal(kind: string, error: unknown) {
   if (shuttingDownAfterFatal) return;
   shuttingDownAfterFatal = true;
   try {
+    for (const timer of backgroundTimers) clearInterval(timer);
     await Promise.all([prisma.$disconnect(), disconnectAllCompanyClients()]);
   } finally {
     process.exit(1);
@@ -33,10 +35,11 @@ const app = createApp();
 
 async function main() {
   await prisma.$connect();
+  await configureCatalogClient();
   app.listen(env.PORT, env.HOST, () => {
     console.log(`RaSetu Retail ERP backend listening on http://${env.HOST}:${env.PORT}`);
   });
-  startSyncWorker();
+  backgroundTimers.push(startSyncWorker(), startCompanyClientIdleSweeper());
 }
 
 main().catch(async (error) => {

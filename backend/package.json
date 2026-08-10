@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json && node scripts/copy-generated.mjs",
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate --schema=prisma/catalog/schema.prisma && prisma generate --schema=prisma/company/schema.prisma",
+    "db:prepare": "node scripts/prepare-seed-dbs.mjs",
     "prisma:migrate:catalog": "prisma migrate dev --schema=prisma/catalog/schema.prisma",
     "prisma:migrate:company": "prisma migrate dev --schema=prisma/company/schema.prisma",
     "prisma:studio:catalog": "prisma studio --schema=prisma/catalog/schema.prisma",

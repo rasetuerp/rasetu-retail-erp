@@ -1,7 +1,7 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
 import { verifyAuthToken } from './jwt.js';
-import { getCompanyClient } from '../db/company-registry.js';
+import { getReadyCompanyClient } from '../db/company-registry.js';
 import { HttpError } from './http-error.js';
 import type { PrismaClient as CompanyPrismaClient } from '../generated/company-client/index.js';
 
@@ -72,7 +72,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   // check above already rejected any mismatch or unscoped token).
   if (req.user.companyId) {
     try {
-      req.companyDb = getCompanyClient(req.user.companyId);
+      req.companyDb = await getReadyCompanyClient(req.user.companyId);
     } catch (err) {
       return next(err);
     }
