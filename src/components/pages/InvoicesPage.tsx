@@ -18,6 +18,7 @@ type InvoiceSummary = {
   status: InvoiceStatus;
   total: string;
   dueDate: string | null;
+  updatedAt: string;
   party: { name: string } | null;
 };
 type PaymentModeEntry = { name: string; isActive: boolean };
@@ -58,7 +59,7 @@ const STATUS_TABS: Array<{ value: InvoiceStatus | 'ALL'; label: string }> = [
   { value: 'CANCELLED', label: 'Cancelled' },
 ];
 
-export function InvoicesPage({ onStartExchange }: { onStartExchange: (partyId: string) => void }) {
+export function InvoicesPage({ onStartExchange, onEditInvoice }: { onStartExchange: (partyId: string) => void; onEditInvoice: (invoiceId: string) => void }) {
   const { session } = useSession();
   const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | 'ALL'>('POSTED');
@@ -188,7 +189,7 @@ export function InvoicesPage({ onStartExchange }: { onStartExchange: (partyId: s
         token: session.token,
         body: { invoiceId: selectedInvoiceId, reason, items },
       });
-      setReturnStatus('Return recorded - stock and the customer balance have been updated.');
+      setReturnStatus(selectedInvoice.partyId ? 'Return recorded - stock and the customer balance have been updated.' : 'Return recorded - stock has been updated.');
       setLastCreditNote({ id: res.creditNote.id, amount: Number(res.creditNote.amount), refundedAmount: Number(res.creditNote.refundedAmount) });
       setRefundError(null);
       setShowReturnForm(false);
@@ -256,6 +257,25 @@ export function InvoicesPage({ onStartExchange }: { onStartExchange: (partyId: s
     }
   }
 
+  async function deleteInvoice(id: string, number: string, safeLast = false) {
+    if (!session) return;
+    const ok = window.confirm(`Delete ${number}?\n\nThe app will block this if it is not safe.`);
+    if (!ok) return;
+    setError(null);
+    try {
+      await apiRequest(`/companies/${session.companyId}/invoices/${safeLast ? 'last/safe' : id}`, {
+        method: 'DELETE',
+        token: session.token,
+        body: safeLast ? { confirmation: 'DELETE LAST INVOICE' } : undefined,
+      });
+      setSelectedInvoice(null);
+      setSelectedInvoiceId(null);
+      await loadInvoices();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'This invoice is not safe to delete');
+    }
+  }
+
   const filtered = search.trim()
     ? invoices.filter((inv) => inv.number.toLowerCase().includes(search.toLowerCase()) || inv.party?.name.toLowerCase().includes(search.toLowerCase()))
     : invoices;
@@ -275,6 +295,21 @@ export function InvoicesPage({ onStartExchange }: { onStartExchange: (partyId: s
           {selectedInvoice.party?.gstin ? ` · GSTIN ${selectedInvoice.party.gstin}` : ''}
         </p>
 
+        <p style={{ color: color.inkFaint, fontSize: 12, marginTop: -10, marginBottom: 16 }}>
+          Last edited {new Date(selectedInvoice.updatedAt ?? selectedInvoice.date).toLocaleString('en-IN')}
+        </p>
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          {(selectedInvoice.status === 'ESTIMATE' || selectedInvoice.status === 'HELD' || selectedInvoice.status === 'DRAFT') && selectedInvoiceId && (
+            <>
+              <button onClick={() => onEditInvoice(selectedInvoiceId)} style={secondaryBtn}>Edit</button>
+              <button onClick={() => void deleteInvoice(selectedInvoiceId, selectedInvoice.number)} style={{ ...secondaryBtn, background: color.alert }}>Delete</button>
+            </>
+          )}
+          {selectedInvoice.status === 'POSTED' && selectedInvoiceId && (
+            <button onClick={() => void deleteInvoice(selectedInvoiceId, selectedInvoice.number, true)} style={{ ...secondaryBtn, background: color.alert }}>Delete Latest If Safe</button>
+          )}
+        </div>
         {selectedInvoice.status === 'ESTIMATE' && (
           <div style={{ background: color.amberTint, color: color.amber, padding: 10, borderRadius: theme.radiusSm, fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <span>Not a tax invoice - for the customer's reference only.</span>
@@ -502,6 +537,7 @@ export function InvoicesPage({ onStartExchange }: { onStartExchange: (partyId: s
                 <th style={{ padding: '10px 12px' }}>Customer</th>
                 <th style={{ padding: '10px 12px' }}>Status</th>
                 <th style={{ padding: '10px 12px' }}>Due Date</th>
+                <th style={{ padding: '10px 12px' }}>Last Edited</th>
                 <th style={{ padding: '10px 12px' }}>Total</th>
               </tr>
             </thead>
@@ -521,6 +557,7 @@ export function InvoicesPage({ onStartExchange }: { onStartExchange: (partyId: s
                       <span style={{ fontFamily: theme.mono, fontSize: 10, padding: '2px 8px', borderRadius: 20, background: sc.bg, color: sc.fg }}>{inv.status}</span>
                     </td>
                     <td style={{ padding: '10px 12px', color: color.inkFaint }}>{inv.dueDate ? new Date(inv.dueDate).toLocaleDateString('en-IN') : '-'}</td>
+                    <td style={{ padding: '10px 12px', color: color.inkFaint }}>{new Date(inv.updatedAt).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</td>
                     <td style={{ padding: '10px 12px', fontFamily: theme.mono }}>₹{Number(inv.total).toLocaleString('en-IN')}</td>
                   </tr>
                 );

@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('rasetu', {
   getUpdateStatus: () => ipcRenderer.invoke('rt:update-status'),
   getBackendStatus: () => ipcRenderer.invoke('rt:backend-status'),
   restartBackend: () => ipcRenderer.invoke('rt:backend-restart'),
+  refreshApp: (payload: unknown) => ipcRenderer.invoke('rt:app-refresh', payload),
   checkForUpdates: () => ipcRenderer.invoke('rt:update-check'),
   installUpdate: () => ipcRenderer.invoke('rt:update-install'),
   onUpdateStatus: (callback: (payload: unknown) => void) => {
@@ -67,6 +68,11 @@ contextBridge.exposeInMainWorld('rasetu', {
   // Scheduling (5min-after-launch, then every 6h) lives entirely in
   // main.ts; these are the user-facing controls (Settings → Backups).
   backup: {
+    getStatus: () => ipcRenderer.invoke('rt:backup-status-get'),
+    getSettings: () => ipcRenderer.invoke('rt:backup-settings-get'),
+    saveSettings: (patch: unknown) => ipcRenderer.invoke('rt:backup-settings-save', patch),
+    pause: () => ipcRenderer.invoke('rt:backup-pause'),
+    resume: () => ipcRenderer.invoke('rt:backup-resume'),
     runNow: () => ipcRenderer.invoke('rt:backup-run-now'),
     offsiteBackupNow: () => ipcRenderer.invoke('rt:offsite-backup-now'),
     setOnlineBackup: (enabled: boolean) => ipcRenderer.invoke('rt:online-backup-set', enabled),
@@ -75,6 +81,11 @@ contextBridge.exposeInMainWorld('rasetu', {
     removeExtraFolder: (folder: string) => ipcRenderer.invoke('rt:backup-extra-folders-remove', folder),
     exportTo: (companyId: string, backupId: string) => ipcRenderer.invoke('rt:backup-export-to', companyId, backupId),
     importExternal: (companyId: string) => ipcRenderer.invoke('rt:backup-import-external', companyId),
+    onStatus: (callback: (payload: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+      ipcRenderer.on('rt:backup-status', listener);
+      return () => ipcRenderer.removeListener('rt:backup-status', listener);
+    },
   },
 });
 

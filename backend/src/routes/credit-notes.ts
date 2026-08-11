@@ -44,7 +44,7 @@ creditNotesRouter.post(
     const prisma = requireCompanyDb(req);
     const input = createCreditNoteSchema.parse(req.body);
     const invoice = await prisma.invoice.findUnique({ where: { id: input.invoiceId } });
-    if (!invoice || !invoice.partyId) throw new HttpError(404, 'Invoice or party not found');
+    if (!invoice) throw new HttpError(404, 'Invoice not found');
 
     const amount = input.items.reduce((sum, i) => sum + i.qty * i.rate, 0);
 
@@ -57,7 +57,7 @@ creditNotesRouter.post(
           companyId: req.params.companyId,
           number,
           invoiceId: input.invoiceId,
-          partyId: invoice.partyId!,
+          partyId: invoice.partyId,
           amount,
           reason: input.reason,
         },
@@ -85,19 +85,21 @@ creditNotesRouter.post(
         await tx.item.update({ where: { id: line.itemId }, data: { stockQty: { increment: line.qty } } });
       }
 
-      const lastEntry = await tx.ledgerEntry.findFirst({ where: { partyId: invoice.partyId! }, orderBy: { date: 'desc' } });
-      const runningBalance = (lastEntry?.balance ? Number(lastEntry.balance) : 0) - amount;
-      await tx.ledgerEntry.create({
-        data: {
-          partyId: invoice.partyId!,
-          credit: amount,
-          balance: runningBalance,
-          refType: 'CreditNote',
-          refId: created.id,
-          invoiceId: invoice.id,
-        },
-      });
-      await tx.party.update({ where: { id: invoice.partyId! }, data: { balance: runningBalance } });
+      if (invoice.partyId) {
+        const lastEntry = await tx.ledgerEntry.findFirst({ where: { partyId: invoice.partyId }, orderBy: { date: 'desc' } });
+        const runningBalance = (lastEntry?.balance ? Number(lastEntry.balance) : 0) - amount;
+        await tx.ledgerEntry.create({
+          data: {
+            partyId: invoice.partyId,
+            credit: amount,
+            balance: runningBalance,
+            refType: 'CreditNote',
+            refId: created.id,
+            invoiceId: invoice.id,
+          },
+        });
+        await tx.party.update({ where: { id: invoice.partyId }, data: { balance: runningBalance } });
+      }
 
       return created;
     });
@@ -136,6 +138,8 @@ creditNotesRouter.post(
     const input = refundSchema.parse(req.body);
     const note = await prisma.creditNote.findUnique({ where: { id: req.params.noteId } });
     if (!note || note.companyId !== req.params.companyId) throw new HttpError(404, 'Credit note not found');
+    if (!note.partyId) throw new HttpError(400, 'Walk-in returns do not have customer store credit to refund here.');
+    const partyId = note.partyId;
 
     const remaining = Number(note.amount) - Number(note.refundedAmount);
     if (input.amount > remaining) {
@@ -158,15 +162,15 @@ creditNotesRouter.post(
           amount: input.amount,
           direction: 'OUT',
           invoiceId: note.invoiceId,
-          partyId: note.partyId,
+          partyId,
         },
       });
 
-      const party = await tx.party.findUniqueOrThrow({ where: { id: note.partyId } });
+      const party = await tx.party.findUniqueOrThrow({ where: { id: partyId } });
       const runningBalance = Number(party.balance) + input.amount;
       await tx.ledgerEntry.create({
         data: {
-          partyId: note.partyId,
+          partyId,
           debit: input.amount,
           balance: runningBalance,
           refType: 'Refund',
@@ -174,7 +178,7 @@ creditNotesRouter.post(
           invoiceId: note.invoiceId,
         },
       });
-      await tx.party.update({ where: { id: note.partyId }, data: { balance: runningBalance } });
+      await tx.party.update({ where: { id: partyId }, data: { balance: runningBalance } });
 
       const updated = await tx.creditNote.update({
         where: { id: note.id },

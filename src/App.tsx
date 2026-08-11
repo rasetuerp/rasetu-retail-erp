@@ -75,6 +75,9 @@ function PageContent({
   billingPartyId,
   onStartExchange,
   onBillingPartyConsumed,
+  billingEditInvoiceId,
+  onBillingEditConsumed,
+  onEditInvoice,
   onNavigate,
   settingsInitialSection,
 }: {
@@ -85,6 +88,9 @@ function PageContent({
   billingPartyId: string | null;
   onStartExchange: (partyId: string) => void;
   onBillingPartyConsumed: () => void;
+  billingEditInvoiceId: string | null;
+  onBillingEditConsumed: () => void;
+  onEditInvoice: (invoiceId: string) => void;
   onNavigate: (tab: Tab) => void;
   settingsInitialSection?: SectionKey;
 }) {
@@ -96,9 +102,9 @@ function PageContent({
     case 'bulk-stock':
       return <BulkStockEntryPage />;
     case 'billing':
-      return <BillingPage initialPartyId={billingPartyId} onInitialPartyConsumed={onBillingPartyConsumed} />;
+      return <BillingPage initialPartyId={billingPartyId} onInitialPartyConsumed={onBillingPartyConsumed} initialEditInvoiceId={billingEditInvoiceId} onInitialEditConsumed={onBillingEditConsumed} />;
     case 'invoices':
-      return <InvoicesPage onStartExchange={onStartExchange} />;
+      return <InvoicesPage onStartExchange={onStartExchange} onEditInvoice={onEditInvoice} />;
     case 'purchase':
       return <PurchasePage />;
     case 'parties':
@@ -653,6 +659,7 @@ function AppShell() {
   // Round 10 — "Bill a replacement now" from a Sales Return, same
   // navigate-with-an-id-then-consume-it pattern as selectedPartyId above.
   const [billingPartyId, setBillingPartyId] = useState<string | null>(null);
+  const [billingEditInvoiceId, setBillingEditInvoiceId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [driveDisconnectedMessage, setDriveDisconnectedMessage] = useState<string | null>(null);
   // Round 22 — top bar's Help/My Account buttons deep-link into Settings on
@@ -667,7 +674,6 @@ function AppShell() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloaded' | 'error'>('idle');
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
-  const [refreshingApp, setRefreshingApp] = useState(false);
   const [appVersion, setAppVersion] = useState('0.1.3');
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
@@ -738,22 +744,6 @@ function AppShell() {
     await window.rasetu.installUpdate();
   }
 
-  async function refreshApp() {
-    if (refreshingApp) return;
-    setRefreshingApp(true);
-    setAlertsOpen(false);
-    setNotepadOpen(false);
-    setProfileMenuOpen(false);
-    try {
-      await window.rasetu?.restartBackend();
-    } catch {
-      // Reload the UI even if the backend restart was unavailable; this button
-      // is meant as a quick recovery action when the screen feels stuck.
-    } finally {
-      window.location.reload();
-    }
-  }
-
   // No session → Setup Wizard / Login gate (docs/SCOPE.md #1). No sidebar until
   // a company + admin account exist.
   if (!session) {
@@ -808,16 +798,6 @@ function AppShell() {
         </button>
         <img src={BRAND_LOGO_DARK} alt="RaSetu" style={{ height: 26, display: 'block' }} />
         <div style={{ flex: 1 }} />
-
-        <button
-          onClick={() => void refreshApp()}
-          disabled={refreshingApp}
-          title="Refresh App"
-          aria-label="Refresh app"
-          style={{ ...topBarIconBtn(false), opacity: refreshingApp ? 0.65 : 1, cursor: refreshingApp ? 'wait' : 'pointer' }}
-        >
-          <RefreshCw size={18} style={{ transform: refreshingApp ? 'rotate(180deg)' : undefined, transition: 'transform 180ms ease' }} />
-        </button>
 
         <AlertsBell
           open={alertsOpen}
@@ -999,6 +979,9 @@ function AppShell() {
             billingPartyId={billingPartyId}
             onStartExchange={(partyId) => { setBillingPartyId(partyId); setActiveTab('billing'); }}
             onBillingPartyConsumed={() => setBillingPartyId(null)}
+            billingEditInvoiceId={billingEditInvoiceId}
+            onBillingEditConsumed={() => setBillingEditInvoiceId(null)}
+            onEditInvoice={(invoiceId) => { setBillingEditInvoiceId(invoiceId); setActiveTab('billing'); }}
             onNavigate={setActiveTab}
             settingsInitialSection={settingsInitialSection}
           />
@@ -1010,6 +993,7 @@ function AppShell() {
 
 function DesktopChrome({ children }: { children: React.ReactNode }) {
   const [isMaximized, setIsMaximized] = useState(false);
+  const [refreshingApp, setRefreshingApp] = useState(false);
 
   useEffect(() => {
     if (!window.rasetu) return;
@@ -1021,6 +1005,26 @@ function DesktopChrome({ children }: { children: React.ReactNode }) {
     await window.rasetu.windowControls.toggleMaximize();
     const state = await window.rasetu.windowControls.getState();
     setIsMaximized(state.isMaximized);
+  }
+
+  async function refreshApp() {
+    if (refreshingApp) return;
+    setRefreshingApp(true);
+    try {
+      await window.rasetu?.refreshApp({
+        source: 'global-titlebar',
+        route: window.location.hash || window.location.pathname,
+        suspectedFreeze: false,
+      });
+    } catch {
+      try {
+        await window.rasetu?.restartBackend();
+      } catch {
+        // The reload is still useful in a plain browser/dev session.
+      }
+    } finally {
+      window.location.reload();
+    }
   }
 
   const canControlWindow = Boolean(window.rasetu);
@@ -1045,6 +1049,17 @@ function DesktopChrome({ children }: { children: React.ReactNode }) {
           <span style={{ fontSize: 12.5, color: color.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>RaSetu Retail ERP</span>
         </div>
         <div style={{ flex: 1 }} />
+        {canControlWindow && (
+          <button
+            onClick={() => void refreshApp()}
+            disabled={refreshingApp}
+            title="Refresh App"
+            aria-label="Refresh app"
+            style={{ ...windowButton, width: 38, cursor: refreshingApp ? 'wait' : 'pointer', opacity: refreshingApp ? 0.65 : 1 }}
+          >
+            <RefreshCw size={15} style={{ transform: refreshingApp ? 'rotate(180deg)' : undefined, transition: 'transform 180ms ease' }} />
+          </button>
+        )}
         {canControlWindow && (
           <div style={{ display: 'flex', height: '100%', ...noDragRegion }}>
             <button onClick={() => void window.rasetu?.windowControls.minimize()} title="Minimize" aria-label="Minimize" style={windowButton}>

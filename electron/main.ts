@@ -19,6 +19,7 @@ import { readPrinterConfig, writePrinterConfig, type PrinterRole, type PrinterCo
 const isDev = !app.isPackaged;
 let mainWindow: BrowserWindow | null = null;
 let backendProcess: ChildProcess | null = null;
+let allowCloseAfterBackupPrompt = false;
 
 const SUPABASE_URL = 'https://doopelkfucwiogrylysj.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_Fp4R_QUz_d_Hzs0pBA2eKw_986nPQzz';
@@ -45,6 +46,26 @@ function writeMainLog(level: string, message?: unknown) {
     fs.appendFileSync(mainLogPath(), `[${new Date().toISOString()}] [${level}] ${text ?? ''}\n`);
   } catch {
     // Logging must never crash the packaged desktop app.
+  }
+}
+
+function refreshEventsPath() {
+  return path.join(app.getPath('userData'), 'diagnostics', 'refresh-events.jsonl');
+}
+
+function appendRefreshEvent(event: { source: string; route: string; suspectedFreeze: boolean; backendRunning: boolean }) {
+  try {
+    const filePath = refreshEventsPath();
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const payload = {
+      ...event,
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      createdAt: new Date().toISOString(),
+    };
+    fs.appendFileSync(filePath, `${JSON.stringify(payload)}\n`);
+  } catch (err) {
+    writeMainLog('warn', err);
   }
 }
 
@@ -130,6 +151,33 @@ function createWindow() {
     : `file://${path.join(app.getAppPath(), 'dist', 'index.html')}`;
   void mainWindow.loadURL(frontendUrl);
 
+  mainWindow.on('close', (event) => {
+    if (allowCloseAfterBackupPrompt) return;
+    const settings = readBackupSettings();
+    if (!settings.backupBeforeClose || !isBackupDue(settings) || backupRuntimeState.running) return;
+    event.preventDefault();
+    const choice = dialog.showMessageBoxSync(mainWindow!, {
+      type: 'question',
+      buttons: ['Backup then close', 'Close without backup', 'Cancel'],
+      defaultId: 0,
+      cancelId: 2,
+      title: 'Backup due',
+      message: 'A scheduled backup is due. Run backup before closing RaSetu?',
+      detail: 'The backup runs in the background and the app will close safely when it finishes.',
+    });
+    if (choice === 2) return;
+    if (choice === 1) {
+      allowCloseAfterBackupPrompt = true;
+      mainWindow?.close();
+      return;
+    }
+    void runScheduledBackupCycle('close').finally(() => {
+      writeBackupSettings({ ...readBackupSettings(), lastScheduledRunKey: backupRunKey(settings) });
+      allowCloseAfterBackupPrompt = true;
+      mainWindow?.close();
+    });
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -157,10 +205,10 @@ app.whenReady().then(() => {
   // independent and swallows its own errors — see runScheduledBackupCycle's
   // and runLicenseRevalidation's own try/catch.
   setTimeout(() => {
-    void runScheduledBackupCycle();
+    void runBackupSchedulerTick('startup');
     void runLicenseRevalidation();
   }, BACKUP_STARTUP_DELAY_MS);
-  setInterval(() => void runScheduledBackupCycle(), BACKUP_INTERVAL_MS);
+  setInterval(() => void runBackupSchedulerTick('timer'), BACKUP_SCHEDULER_TICK_MS);
   setInterval(() => void runLicenseRevalidation(), LICENSE_CHECK_INTERVAL_MS);
 
   app.on('activate', () => {
@@ -193,6 +241,18 @@ ipcMain.handle('rt:backend-status', () => ({ running: backendProcess !== null &&
 ipcMain.handle('rt:backend-restart', () => {
   backendProcess?.kill();
   startBackend();
+});
+ipcMain.handle('rt:app-refresh', (_event, payload?: { source?: string; route?: string; suspectedFreeze?: boolean }) => {
+  const backendRunning = backendProcess !== null && !backendProcess.killed;
+  appendRefreshEvent({
+    source: payload?.source ?? 'manual',
+    route: payload?.route ?? '',
+    suspectedFreeze: Boolean(payload?.suspectedFreeze),
+    backendRunning,
+  });
+  backendProcess?.kill();
+  startBackend();
+  return { loggedAt: new Date().toISOString(), backendRestarted: true };
 });
 ipcMain.handle('rt:update-check', async () => {
   try {
@@ -378,10 +438,10 @@ autoUpdater.on('error', (err) => {
 // file only provides thin native-dialog utilities for those (folder/file
 // pickers), never duplicates the restore logic itself.
 const BACKUP_STARTUP_DELAY_MS = 5 * 60 * 1000;
-const BACKUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const BACKUP_SCHEDULER_TICK_MS = 60 * 1000;
 const LICENSE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
-const LOCAL_KEEP_LATEST = 12;
-const EXTRA_FOLDER_KEEP_LATEST = 7;
+const LOCAL_KEEP_LATEST = 2;
+const EXTRA_FOLDER_KEEP_LATEST = 2;
 
 type BackupManifestLite = {
   id: string;
@@ -392,8 +452,40 @@ type BackupManifestLite = {
   createdAt: string;
 };
 
-type BackupSettings = { onlineBackupEnabled: boolean; extraFolders: string[] };
+type BackupSettings = {
+  onlineBackupEnabled: boolean;
+  extraFolders: string[];
+  scheduleEnabled: boolean;
+  frequency: 'daily' | 'weekly';
+  time: string;
+  weekday: number;
+  backupBeforeClose: boolean;
+  paused: boolean;
+  lastScheduledRunKey?: string;
+};
+type BackupRuntimeState = {
+  running: boolean;
+  mode: 'idle' | 'manual' | 'scheduled' | 'close';
+  startedAt?: string;
+  finishedAt?: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+  currentCompanyId?: string;
+  pauseRequested: boolean;
+};
 type OffsiteBackupState = { lastUploadAt?: string; fileName?: string; bytes?: number; databaseHash?: string };
+
+const DEFAULT_BACKUP_SETTINGS: BackupSettings = {
+  onlineBackupEnabled: false,
+  extraFolders: [],
+  scheduleEnabled: true,
+  frequency: 'daily',
+  time: '19:00',
+  weekday: 1,
+  backupBeforeClose: true,
+  paused: false,
+};
+const backupRuntimeState: BackupRuntimeState = { running: false, mode: 'idle', pauseRequested: false };
 
 function companiesDataDir() {
   return path.join(app.getPath('userData'), 'companies');
@@ -413,9 +505,9 @@ function offsiteBackupStatePath(companyId: string) {
 
 function readBackupSettings(): BackupSettings {
   try {
-    return { onlineBackupEnabled: false, extraFolders: [], ...JSON.parse(fs.readFileSync(backupSettingsPath(), 'utf8')) };
+    return { ...DEFAULT_BACKUP_SETTINGS, ...JSON.parse(fs.readFileSync(backupSettingsPath(), 'utf8')) };
   } catch {
-    return { onlineBackupEnabled: false, extraFolders: [] };
+    return DEFAULT_BACKUP_SETTINGS;
   }
 }
 function writeBackupSettings(settings: BackupSettings) {
@@ -438,8 +530,15 @@ function writeOffsiteState(companyId: string, state: OffsiteBackupState) {
 function isoStampSafe() {
   return new Date().toISOString().replace(/[:.]/g, '-');
 }
-function sha256File(filePath: string): string {
-  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+
+async function sha256File(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
 }
 
 /** Directory-scan fallback (pre-Round-9 behavior) — internal companies only, used when the backend can't be reached so a backend hiccup degrades to "internal only" rather than skipping every company's backup. */
@@ -479,21 +578,22 @@ async function listCompanyDbFiles(): Promise<Array<{ companyId: string; dbPath: 
   }
 }
 
-function createLocalBackup(companyId: string, dbPath: string, reason: string): BackupManifestLite {
+async function createLocalBackup(companyId: string, dbPath: string, reason: string): Promise<BackupManifestLite> {
   const dir = companyBackupDir(companyId);
-  fs.mkdirSync(dir, { recursive: true });
+  await fs.promises.mkdir(dir, { recursive: true });
   const id = `rasetu-${reason}-${isoStampSafe()}`;
   const backupPath = path.join(dir, `${id}.db`);
-  fs.copyFileSync(dbPath, backupPath);
+  await fs.promises.copyFile(dbPath, backupPath);
+  const stat = await fs.promises.stat(backupPath);
   const manifest: BackupManifestLite = {
     id,
     companyId,
     reason,
-    sha256: sha256File(backupPath),
-    sizeBytes: fs.statSync(backupPath).size,
+    sha256: await sha256File(backupPath),
+    sizeBytes: stat.size,
     createdAt: new Date().toISOString(),
   };
-  fs.writeFileSync(path.join(dir, `${id}.manifest.json`), JSON.stringify(manifest, null, 2));
+  await fs.promises.writeFile(path.join(dir, `${id}.manifest.json`), JSON.stringify(manifest, null, 2));
   return manifest;
 }
 
@@ -555,26 +655,58 @@ async function uploadToR2(companyId: string, backupFilePath: string): Promise<vo
   writeOffsiteState(companyId, { lastUploadAt: new Date().toISOString(), fileName: payload.data.fileName ?? fileName, bytes: gz.length, databaseHash: hash });
 }
 
-/** Local backup + every configured extra folder + opt-in R2 upload, for every company on this machine. Each destination is independent — one failing (an unplugged drive, no internet) must never block the others. */
-async function runScheduledBackupCycle(): Promise<void> {
+function backupRunKey(settings: BackupSettings, date = new Date()): string {
+  const day = date.toISOString().slice(0, 10);
+  return settings.frequency === 'weekly' ? `${day}-w${settings.weekday}` : day;
+}
+
+function isBackupDue(settings: BackupSettings, now = new Date()): boolean {
+  if (!settings.scheduleEnabled || settings.paused) return false;
+  if (settings.frequency === 'weekly' && now.getDay() !== settings.weekday) return false;
+  const [hour, minute] = settings.time.split(':').map((n) => Number(n));
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false;
+  const due = new Date(now);
+  due.setHours(hour, minute, 0, 0);
+  return now >= due && settings.lastScheduledRunKey !== backupRunKey(settings, now);
+}
+
+function publishBackupStatus() {
+  mainWindow?.webContents.send('rt:backup-status', { settings: readBackupSettings(), state: backupRuntimeState });
+}
+
+/** Local backup + every configured extra folder + opt-in R2 upload, for every company on this machine. Each destination is independent; one failing destination must never block the others. */
+async function runScheduledBackupCycle(mode: 'manual' | 'scheduled' | 'close' = 'scheduled'): Promise<void> {
+  if (backupRuntimeState.running) return;
   const settings = readBackupSettings();
+  backupRuntimeState.running = true;
+  backupRuntimeState.mode = mode;
+  backupRuntimeState.startedAt = new Date().toISOString();
+  backupRuntimeState.finishedAt = undefined;
+  backupRuntimeState.lastError = undefined;
+  backupRuntimeState.pauseRequested = false;
+  publishBackupStatus();
+
   for (const { companyId, dbPath } of await listCompanyDbFiles()) {
+    if (backupRuntimeState.pauseRequested || readBackupSettings().paused) break;
+    backupRuntimeState.currentCompanyId = companyId;
+    publishBackupStatus();
     try {
-      const manifest = createLocalBackup(companyId, dbPath, 'scheduled');
+      const manifest = await createLocalBackup(companyId, dbPath, mode === 'manual' ? 'manual' : 'scheduled');
       pruneAutomatedBackups(companyId, LOCAL_KEEP_LATEST);
       const backupFilePath = path.join(companyBackupDir(companyId), `${manifest.id}.db`);
 
       for (const folder of settings.extraFolders) {
+        if (backupRuntimeState.pauseRequested || readBackupSettings().paused) break;
         try {
-          fs.mkdirSync(folder, { recursive: true });
-          fs.copyFileSync(backupFilePath, path.join(folder, `rasetu-backup-${companyId}-${isoStampSafe()}.db`));
+          await fs.promises.mkdir(folder, { recursive: true });
+          await fs.promises.copyFile(backupFilePath, path.join(folder, `rasetu-backup-${companyId}-${isoStampSafe()}.db`));
           pruneExtraFolderCopies(folder, companyId, EXTRA_FOLDER_KEEP_LATEST);
         } catch (err) {
           console.error('[backup] extra-folder copy failed', folder, err);
         }
       }
 
-      if (settings.onlineBackupEnabled) {
+      if (settings.onlineBackupEnabled && !backupRuntimeState.pauseRequested && !readBackupSettings().paused) {
         try {
           await uploadToR2(companyId, backupFilePath);
         } catch (err) {
@@ -582,11 +714,25 @@ async function runScheduledBackupCycle(): Promise<void> {
         }
       }
     } catch (err) {
+      backupRuntimeState.lastError = err instanceof Error ? err.message : String(err);
       console.error('[backup] scheduled backup failed for company', companyId, err);
     }
   }
+
+  backupRuntimeState.running = false;
+  backupRuntimeState.mode = 'idle';
+  backupRuntimeState.currentCompanyId = undefined;
+  backupRuntimeState.finishedAt = new Date().toISOString();
+  if (!backupRuntimeState.lastError) backupRuntimeState.lastSuccessAt = backupRuntimeState.finishedAt;
+  publishBackupStatus();
 }
 
+async function runBackupSchedulerTick(_source: 'startup' | 'timer') {
+  const settings = readBackupSettings();
+  if (!isBackupDue(settings)) return;
+  await runScheduledBackupCycle('scheduled');
+  writeBackupSettings({ ...readBackupSettings(), lastScheduledRunKey: backupRunKey(settings) });
+}
 /** Best-effort background license re-check, mirrors src/lib/license.ts's revalidateLicenseInBackground() but from the main process so it can broadcast rt:license-blocked if a check newly blocks the app. */
 async function runLicenseRevalidation(): Promise<void> {
   const snapshot = readLicenseSnapshot();
@@ -616,8 +762,29 @@ async function runLicenseRevalidation(): Promise<void> {
   }
 }
 
+ipcMain.handle('rt:backup-status-get', () => ({ settings: readBackupSettings(), state: backupRuntimeState }));
+ipcMain.handle('rt:backup-settings-get', () => readBackupSettings());
+ipcMain.handle('rt:backup-settings-save', (_event, patch: Partial<BackupSettings>) => {
+  const next = { ...readBackupSettings(), ...patch };
+  writeBackupSettings(next);
+  publishBackupStatus();
+  return next;
+});
+ipcMain.handle('rt:backup-pause', () => {
+  backupRuntimeState.pauseRequested = true;
+  writeBackupSettings({ ...readBackupSettings(), paused: true });
+  publishBackupStatus();
+  return { settings: readBackupSettings(), state: backupRuntimeState };
+});
+ipcMain.handle('rt:backup-resume', () => {
+  backupRuntimeState.pauseRequested = false;
+  writeBackupSettings({ ...readBackupSettings(), paused: false });
+  publishBackupStatus();
+  return { settings: readBackupSettings(), state: backupRuntimeState };
+});
+
 ipcMain.handle('rt:backup-run-now', async () => {
-  await runScheduledBackupCycle();
+  await runScheduledBackupCycle('manual');
   return { ranAt: new Date().toISOString() };
 });
 
@@ -627,7 +794,7 @@ ipcMain.handle('rt:offsite-backup-now', async () => {
   const results: Array<{ companyId: string; ok: boolean; error?: string }> = [];
   for (const { companyId, dbPath } of await listCompanyDbFiles()) {
     try {
-      const manifest = createLocalBackup(companyId, dbPath, 'scheduled');
+      const manifest = await createLocalBackup(companyId, dbPath, 'scheduled');
       await uploadToR2(companyId, path.join(companyBackupDir(companyId), `${manifest.id}.db`));
       results.push({ companyId, ok: true });
     } catch (err) {
@@ -676,7 +843,7 @@ ipcMain.handle('rt:backup-export-to', async (_event, companyId: string, backupId
     filters: [{ name: 'RaSetu database backup', extensions: ['db'] }],
   });
   if (result.canceled || !result.filePath) return { exported: false };
-  fs.copyFileSync(sourcePath, result.filePath);
+  await fs.promises.copyFile(sourcePath, result.filePath);
   return { exported: true, path: result.filePath };
 });
 
@@ -694,6 +861,6 @@ ipcMain.handle('rt:backup-import-external', async (_event, companyId: string) =>
   });
   if (result.canceled || !result.filePaths[0]) return { imported: false };
 
-  const manifest = createLocalBackup(companyId, result.filePaths[0], 'imported');
+  const manifest = await createLocalBackup(companyId, result.filePaths[0], 'imported');
   return { imported: true, backupId: manifest.id };
 });

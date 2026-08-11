@@ -93,7 +93,12 @@ function categoryColor(category: string | null) {
 // Round 10 — "Bill a replacement now" from a just-posted Sales Return
 // (InvoicesPage.tsx) lands here with only a partyId; App.tsx wires this the
 // same way it already does for Dashboard→Parties (onNavigateToParty).
-export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initialPartyId?: string | null; onInitialPartyConsumed?: () => void } = {}) {
+export function BillingPage({
+  initialPartyId,
+  onInitialPartyConsumed,
+  initialEditInvoiceId,
+  onInitialEditConsumed,
+}: { initialPartyId?: string | null; onInitialPartyConsumed?: () => void; initialEditInvoiceId?: string | null; onInitialEditConsumed?: () => void } = {}) {
   const { session } = useSession();
   const isAdmin = session?.user.role === 'ADMIN' || session?.user.role === 'SUPER_ADMIN';
   const [items, setItems] = useState<Item[]>([]);
@@ -102,6 +107,7 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
   const [error, setError] = useState<string | null>(null);
   const [heldBills, setHeldBills] = useState<InvoiceSummary[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingPartyId, setEditingPartyId] = useState<string | null>(null);
 
   // Round 5 — customer is search-driven rather than a full-list dropdown, so
   // "the family under this phone number" naturally falls out of the same
@@ -379,6 +385,7 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
     setBillDiscountAmt(0);
     setCartGen((g) => g + 1);
     setEditingId(null);
+    setEditingPartyId(null);
   }
 
   // "+ New bill" — resetCart() alone leaves the previous invoice's posted
@@ -410,7 +417,7 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
     if (!session || cart.length === 0) return;
     setError(null);
     const body = {
-      partyId: selectedParty?.id || undefined,
+      partyId: selectedParty?.id || editingPartyId || undefined,
       status: 'HELD' as const,
       items: cartToLineBodies(),
       dueDate,
@@ -452,7 +459,7 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
     // paid off and blocking real payments from being recorded.
     setPayingAmount(null);
     const body = {
-      partyId: selectedParty?.id || undefined,
+      partyId: selectedParty?.id || editingPartyId || undefined,
       status: 'HELD' as const,
       items: cartToLineBodies(),
       dueDate,
@@ -500,7 +507,7 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
     if (!session || cart.length === 0) return;
     setError(null);
     const body = {
-      partyId: selectedParty?.id || undefined,
+      partyId: selectedParty?.id || editingPartyId || undefined,
       status: 'ESTIMATE' as const,
       items: cartToLineBodies(),
       dueDate,
@@ -553,6 +560,7 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
     // Reopening a held/draft bill doesn't currently restore its original
     // customer selection — pre-existing limitation, unchanged by Round 5.
     setSelectedParty(null);
+    setEditingPartyId(null);
     setBillDiscountPct(Number(invoice.discountPct));
     setBillDiscountAmt(Number(invoice.discountAmt));
     setCartGen((g) => g + 1);
@@ -574,6 +582,54 @@ export function BillingPage({ initialPartyId, onInitialPartyConsumed }: { initia
       })
     );
   }
+
+  useEffect(() => {
+    if (!session || !initialEditInvoiceId || items.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiRequest<{ invoice: PrintableInvoice }>(`/companies/${session.companyId}/invoices/${initialEditInvoiceId}`, { token: session.token });
+        if (cancelled) return;
+        const invoice = res.invoice;
+        if (invoice.status !== 'ESTIMATE' && invoice.status !== 'HELD' && invoice.status !== 'DRAFT') {
+          setError('Only estimates or held bills can be edited here.');
+          onInitialEditConsumed?.();
+          return;
+        }
+        setPostedInvoice(null);
+        setPrintableInvoice(null);
+        setPayingAmount(null);
+        setEditingId(invoice.id);
+        setEditingPartyId(invoice.partyId ?? null);
+        setSelectedParty(null);
+        setBillDiscountPct(Number(invoice.discountPct));
+        setBillDiscountAmt(Number(invoice.discountAmt));
+        setCartGen((g) => g + 1);
+        setCart(invoice.items.map((line) => {
+          const item = items.find((i) => i.id === line.itemId);
+          return {
+            itemId: line.itemId,
+            sku: item?.sku ?? line.item.sku,
+            hsn: item?.hsn ?? line.item.hsn ?? null,
+            category: item?.category ?? line.item.category ?? null,
+            qty: Number(line.qty),
+            rate: Number(line.rate),
+            mrp: Number(item?.mrp ?? line.rate),
+            gstRate: Number(line.gstRate),
+            gstInclusive: line.gstInclusive,
+            discountPct: Number(line.discountPct),
+          };
+        }));
+        onInitialEditConsumed?.();
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Failed to open bill for edit');
+        onInitialEditConsumed?.();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialEditInvoiceId, items, onInitialEditConsumed, session]);
 
   const filteredItems = search.trim()
     ? items.filter((i) => {

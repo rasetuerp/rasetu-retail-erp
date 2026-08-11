@@ -284,8 +284,8 @@ model CreditNote {
   date       DateTime @default(now())
   invoiceId  String
   invoice    Invoice  @relation(fields: [invoiceId], references: [id])
-  partyId    String
-  party      Party    @relation(fields: [partyId], references: [id])
+    partyId    String?
+    party      Party?   @relation(fields: [partyId], references: [id])
   amount     Decimal
   reason     String
   createdAt  DateTime @default(now())

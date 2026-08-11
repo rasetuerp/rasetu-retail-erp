@@ -99,6 +99,42 @@ async function configureCompanyClient(client: CompanyPrismaClient): Promise<void
   await client.$queryRawUnsafe('PRAGMA journal_mode = WAL');
   await client.$queryRawUnsafe('PRAGMA synchronous = NORMAL');
   await client.$queryRawUnsafe('PRAGMA foreign_keys = ON');
+  await migrateCreditNotePartyNullable(client);
+}
+
+async function migrateCreditNotePartyNullable(client: CompanyPrismaClient): Promise<void> {
+  const columns = await client.$queryRawUnsafe<Array<{ name: string; notnull: number }>>('PRAGMA table_info("CreditNote")');
+  const partyId = columns.find((column) => column.name === 'partyId');
+  if (!partyId || partyId.notnull === 0) return;
+
+  await client.$executeRawUnsafe('PRAGMA foreign_keys = OFF');
+  try {
+    await client.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "CreditNote_new" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "companyId" TEXT NOT NULL,
+        "number" TEXT NOT NULL,
+        "date" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "invoiceId" TEXT NOT NULL,
+        "partyId" TEXT,
+        "amount" DECIMAL NOT NULL,
+        "reason" TEXT NOT NULL,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "refundedAmount" DECIMAL NOT NULL DEFAULT 0,
+        CONSTRAINT "CreditNote_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+        CONSTRAINT "CreditNote_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+      )
+    `);
+    await client.$executeRawUnsafe(`
+      INSERT INTO "CreditNote_new" ("id", "companyId", "number", "date", "invoiceId", "partyId", "amount", "reason", "createdAt", "refundedAmount")
+      SELECT "id", "companyId", "number", "date", "invoiceId", "partyId", "amount", "reason", "createdAt", "refundedAmount" FROM "CreditNote"
+    `);
+    await client.$executeRawUnsafe('DROP TABLE "CreditNote"');
+    await client.$executeRawUnsafe('ALTER TABLE "CreditNote_new" RENAME TO "CreditNote"');
+    await client.$executeRawUnsafe('CREATE UNIQUE INDEX IF NOT EXISTS "CreditNote_companyId_number_key" ON "CreditNote"("companyId", "number")');
+  } finally {
+    await client.$executeRawUnsafe('PRAGMA foreign_keys = ON');
+  }
 }
 
 /** Opens an existing company's database. 404s if that company was never provisioned; 503s (DRIVE_DISCONNECTED) if it's a known-external company whose drive isn't reachable right now. */

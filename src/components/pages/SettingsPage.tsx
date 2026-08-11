@@ -1114,6 +1114,169 @@ function DaysRemaining({ days }: { days: number }) {
   return <span style={{ color: col, fontWeight: days <= 7 ? 600 : 400 }}>{text}</span>;
 }
 
+type BackupSettings = {
+  onlineBackupEnabled: boolean;
+  extraFolders: string[];
+  scheduleEnabled: boolean;
+  frequency: 'daily' | 'weekly';
+  time: string;
+  weekday: number;
+  backupBeforeClose: boolean;
+  paused: boolean;
+  lastScheduledRunKey?: string;
+};
+type BackupRuntimeState = {
+  running: boolean;
+  mode: 'idle' | 'manual' | 'scheduled' | 'close';
+  startedAt?: string;
+  finishedAt?: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+  currentCompanyId?: string;
+  pauseRequested: boolean;
+};
+
+function BackupWorkflowCard() {
+  const [settings, setSettings] = useState<BackupSettings | null>(null);
+  const [state, setState] = useState<BackupRuntimeState | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const scheduleEnabledRef = useRef<HTMLInputElement>(null);
+  const frequencyRef = useRef<HTMLSelectElement>(null);
+  const timeRef = useRef<HTMLInputElement>(null);
+  const weekdayRef = useRef<HTMLSelectElement>(null);
+  const beforeCloseRef = useRef<HTMLInputElement>(null);
+  const cloudRef = useRef<HTMLInputElement>(null);
+
+  async function load() {
+    if (!window.rasetu) return;
+    const res = await window.rasetu.backup.getStatus();
+    setSettings(res.settings);
+    setState(res.state);
+  }
+
+  useEffect(() => {
+    void load();
+    if (!window.rasetu) return;
+    return window.rasetu.backup.onStatus((payload) => {
+      setSettings(payload.settings);
+      setState(payload.state);
+    });
+  }, []);
+
+  async function saveSettings() {
+    if (!window.rasetu) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const next = await window.rasetu.backup.saveSettings({
+        scheduleEnabled: Boolean(scheduleEnabledRef.current?.checked),
+        frequency: (frequencyRef.current?.value as 'daily' | 'weekly') ?? 'daily',
+        time: timeRef.current?.value || '19:00',
+        weekday: Number(weekdayRef.current?.value ?? 1),
+        backupBeforeClose: Boolean(beforeCloseRef.current?.checked),
+        onlineBackupEnabled: Boolean(cloudRef.current?.checked),
+      });
+      setSettings(next);
+      setStatus('Backup settings saved.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save backup settings');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function runNow() {
+    if (!window.rasetu) return;
+    setStatus('Backup started. You can keep working while it runs.');
+    setError(null);
+    try {
+      await window.rasetu.backup.runNow();
+      setStatus('Backup completed.');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Backup failed');
+    }
+  }
+
+  async function pause() {
+    if (!window.rasetu) return;
+    const res = await window.rasetu.backup.pause();
+    setSettings(res.settings);
+    setState(res.state);
+    setStatus('Backup paused. Current file copy may finish first.');
+  }
+
+  async function resume() {
+    if (!window.rasetu) return;
+    const res = await window.rasetu.backup.resume();
+    setSettings(res.settings);
+    setState(res.state);
+    setStatus('Backup schedule resumed.');
+  }
+
+  async function addFolder() {
+    if (!window.rasetu || !settings) return;
+    const folders = await window.rasetu.backup.addExtraFolder();
+    setSettings({ ...settings, extraFolders: folders });
+  }
+
+  async function removeFolder(folder: string) {
+    if (!window.rasetu || !settings) return;
+    const folders = await window.rasetu.backup.removeExtraFolder(folder);
+    setSettings({ ...settings, extraFolders: folders });
+  }
+
+  if (typeof window === 'undefined' || !window.rasetu) return null;
+  if (!settings || !state) return <div style={{ color: color.inkFaint, fontSize: 13 }}>Loading backup settings...</div>;
+
+  return (
+    <div style={{ maxWidth: 680, background: color.paperRaised, border: `1px solid ${color.line}`, borderRadius: theme.radius, padding: 18, boxShadow: theme.shadowSm }}>
+      <h2 style={{ fontFamily: theme.serif, fontWeight: 400, fontSize: 18, margin: '0 0 4px', color: color.ink }}>Backups</h2>
+      <p style={{ color: color.inkFaint, fontSize: 12.5, margin: '0 0 14px' }}>Automated backups keep the latest 2 copies and run in the background.</p>
+      {error && <div style={{ background: color.alertTint, color: color.alert, padding: 10, borderRadius: theme.radiusSm, fontSize: 13, marginBottom: 10 }}>{error}</div>}
+      {status && <div style={{ background: color.moneyTint, color: color.money, padding: 10, borderRadius: theme.radiusSm, fontSize: 13, marginBottom: 10 }}>{status}</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10, marginBottom: 12 }}>
+        <label style={labelStyle}><span><input ref={scheduleEnabledRef} type="checkbox" defaultChecked={settings.scheduleEnabled} /> Auto backup</span></label>
+        <label style={labelStyle}>Frequency<select ref={frequencyRef} defaultValue={settings.frequency} style={inputStyle}><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>
+        <label style={labelStyle}>Time<input ref={timeRef} type="time" defaultValue={settings.time} style={inputStyle} /></label>
+        <label style={labelStyle}>Weekly day<select ref={weekdayRef} defaultValue={settings.weekday} style={inputStyle}><option value={1}>Monday</option><option value={2}>Tuesday</option><option value={3}>Wednesday</option><option value={4}>Thursday</option><option value={5}>Friday</option><option value={6}>Saturday</option><option value={0}>Sunday</option></select></label>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 12 }}>
+        <label style={{ fontSize: 12.5, color: color.inkSoft }}><input ref={beforeCloseRef} type="checkbox" defaultChecked={settings.backupBeforeClose} /> Ask backup before close when due</label>
+        <label style={{ fontSize: 12.5, color: color.inkSoft }}><input ref={cloudRef} type="checkbox" defaultChecked={settings.onlineBackupEnabled} /> Cloud backup</label>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <button onClick={() => void saveSettings()} disabled={saving} style={{ padding: '9px 16px', background: color.brass, color: '#fff', border: 'none', borderRadius: theme.radiusSm, cursor: 'pointer', fontSize: 13.5, fontWeight: 700 }}>{saving ? 'Saving...' : 'Save Backup Settings'}</button>
+        <button onClick={() => void runNow()} disabled={state.running} style={{ padding: '9px 16px', background: color.ledger, color: '#fff', border: 'none', borderRadius: theme.radiusSm, cursor: 'pointer', fontSize: 13.5, fontWeight: 700 }}>{state.running ? 'Backup running...' : 'Run Backup Now'}</button>
+        {settings.paused ? (
+          <button onClick={() => void resume()} style={{ padding: '9px 16px', background: color.money, color: '#fff', border: 'none', borderRadius: theme.radiusSm, cursor: 'pointer', fontSize: 13.5, fontWeight: 700 }}>Resume</button>
+        ) : (
+          <button onClick={() => void pause()} style={{ padding: '9px 16px', background: 'transparent', color: color.alert, border: `1px solid ${color.alert}`, borderRadius: theme.radiusSm, cursor: 'pointer', fontSize: 13.5, fontWeight: 700 }}>Pause</button>
+        )}
+        <button onClick={() => void addFolder()} style={{ padding: '9px 16px', background: 'transparent', color: color.brass, border: `1px solid ${color.brass}`, borderRadius: theme.radiusSm, cursor: 'pointer', fontSize: 13.5, fontWeight: 700 }}>Add Folder</button>
+      </div>
+      <div style={{ fontSize: 12.5, color: color.inkSoft, marginBottom: 10 }}>
+        Status: {state.running ? `Running ${state.mode}${state.currentCompanyId ? ` for ${state.currentCompanyId}` : ''}` : settings.paused ? 'Paused' : 'Ready'}
+        {state.lastSuccessAt ? ` - Last success ${new Date(state.lastSuccessAt).toLocaleString('en-IN')}` : ''}
+        {state.lastError ? ` - Last error: ${state.lastError}` : ''}
+      </div>
+      {settings.extraFolders.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={groupHeadingStyle}>Extra backup folders</div>
+          {settings.extraFolders.map((folder) => (
+            <div key={folder} style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${color.lineSoft}`, borderRadius: theme.radiusSm, padding: 8, fontSize: 12.5 }}>
+              <span style={{ fontFamily: theme.mono, overflow: 'hidden', textOverflow: 'ellipsis' }}>{folder}</span>
+              <button onClick={() => void removeFolder(folder)} style={{ border: 'none', background: 'transparent', color: color.alert, cursor: 'pointer', fontSize: 12, textDecoration: 'underline' }}>Remove</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LicenseStatusCard() {
   const [status, setStatus] = useState<StartupLicenseStatus | null>(null);
   const [checking, setChecking] = useState(false);
@@ -1363,7 +1526,7 @@ function HelpCard() {
 // fetch/save logic untouched; `visible` on each section just reuses the same
 // role/window.rasetu checks that used to gate each card's `{cond && <Card/>}`
 // line directly.
-export type SectionKey = 'profile' | 'items' | 'billing' | 'data' | 'license' | 'account' | 'help';
+export type SectionKey = 'profile' | 'items' | 'billing' | 'backup' | 'data' | 'license' | 'account' | 'help';
 
 export function SettingsPage({ initialSection }: { initialSection?: SectionKey } = {}) {
   const { session } = useSession();
@@ -1566,6 +1729,7 @@ export function SettingsPage({ initialSection }: { initialSection?: SectionKey }
         </div>
       ),
     },
+    { key: 'backup', label: 'Backups', visible: isAdmin && isDesktop, render: () => <BackupWorkflowCard /> },
     { key: 'data', label: 'Data Reset', visible: isAdmin, render: () => <DataManagementCard /> },
     { key: 'license', label: 'License', visible: isAdmin && isDesktop, render: () => <LicenseStatusCard /> },
     { key: 'account', label: 'Account & Security', visible: true, render: () => <MyAccountCard /> },

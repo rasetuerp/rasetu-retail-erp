@@ -380,8 +380,8 @@ invoicesRouter.put(
     if (!existing) throw new HttpError(404, 'Invoice not found');
     // SCHEMA.md: only Draft/Held bills are freely editable — posted invoices
     // are corrected via Credit Note, cancelled invoices are terminal.
-    if (existing.status !== 'DRAFT' && existing.status !== 'HELD') {
-      throw new HttpError(400, 'Only draft or held invoices can be edited — use a credit note instead');
+    if (existing.status !== 'DRAFT' && existing.status !== 'HELD' && existing.status !== 'ESTIMATE') {
+      throw new HttpError(400, 'Only draft, held, or estimate bills can be edited — use a credit note instead');
     }
 
     const existingCompany = await catalogPrisma.company.findUnique({ where: { id: existing.companyId } });
@@ -447,8 +447,8 @@ invoicesRouter.delete(
     const prisma = requireCompanyDb(req);
     const existing = await prisma.invoice.findUnique({ where: { id: req.params.id } });
     if (!existing) throw new HttpError(404, 'Invoice not found');
-    if (existing.status !== 'DRAFT' && existing.status !== 'HELD') {
-      throw new HttpError(400, 'Only held bills can be removed — posted invoices must be cancelled instead');
+    if (existing.status !== 'DRAFT' && existing.status !== 'HELD' && existing.status !== 'ESTIMATE') {
+      throw new HttpError(400, 'Only held bills and estimates can be removed — posted invoices must be cancelled instead');
     }
 
     await prisma.$transaction(async (tx) => {

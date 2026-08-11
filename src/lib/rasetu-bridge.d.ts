@@ -43,6 +43,7 @@ declare global {
       getUpdateStatus: () => Promise<unknown>;
       getBackendStatus: () => Promise<{ running: boolean }>;
       restartBackend: () => Promise<void>;
+      refreshApp: (payload?: { source?: string; route?: string; suspectedFreeze?: boolean }) => Promise<{ loggedAt: string; backendRestarted: boolean }>;
       checkForUpdates: () => Promise<unknown>;
       installUpdate: () => Promise<void>;
       onUpdateStatus: (callback: (payload: unknown) => void) => () => void;
@@ -94,6 +95,14 @@ declare global {
       };
 
       backup: {
+        getStatus: () => Promise<{
+          settings: BackupSettings;
+          state: BackupRuntimeState;
+        }>;
+        getSettings: () => Promise<BackupSettings>;
+        saveSettings: (patch: Partial<BackupSettings>) => Promise<BackupSettings>;
+        pause: () => Promise<{ settings: BackupSettings; state: BackupRuntimeState }>;
+        resume: () => Promise<{ settings: BackupSettings; state: BackupRuntimeState }>;
         runNow: () => Promise<{ ranAt: string }>;
         offsiteBackupNow: () => Promise<{ results: Array<{ companyId: string; ok: boolean; error?: string }> }>;
         setOnlineBackup: (enabled: boolean) => Promise<{ onlineBackupEnabled: boolean }>;
@@ -102,7 +111,31 @@ declare global {
         removeExtraFolder: (folder: string) => Promise<string[]>;
         exportTo: (companyId: string, backupId: string) => Promise<{ exported: boolean; path?: string }>;
         importExternal: (companyId: string) => Promise<{ imported: boolean; backupId?: string }>;
+        onStatus: (callback: (payload: { settings: BackupSettings; state: BackupRuntimeState }) => void) => () => void;
       };
     };
   }
 }
+
+type BackupSettings = {
+  onlineBackupEnabled: boolean;
+  extraFolders: string[];
+  scheduleEnabled: boolean;
+  frequency: 'daily' | 'weekly';
+  time: string;
+  weekday: number;
+  backupBeforeClose: boolean;
+  paused: boolean;
+  lastScheduledRunKey?: string;
+};
+
+type BackupRuntimeState = {
+  running: boolean;
+  mode: 'idle' | 'manual' | 'scheduled' | 'close';
+  startedAt?: string;
+  finishedAt?: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+  currentCompanyId?: string;
+  pauseRequested: boolean;
+};

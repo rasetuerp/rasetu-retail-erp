@@ -3,8 +3,10 @@
 // 3 thermal layouts + 2 A4/A5 layouts, fixed — no drag-and-drop designer in v1.
 
 export type PrintableInvoice = {
+  id: string;
   number: string;
   date: string;
+  updatedAt?: string;
   // Optional — not read by any of the print builders below, only used by
   // pages (e.g. InvoicesPage.tsx) that need to know the document's lifecycle
   // state, such as whether an Estimate can still be converted to a real bill.
@@ -18,6 +20,8 @@ export type PrintableInvoice = {
     qty: string;
     rate: string;
     gstRate: string;
+    gstInclusive: boolean;
+    discountPct: string;
     amount: string;
     item: { sku: string; hsn: string | null; category: string | null; brand: string | null; size: string | null; color: string | null };
   }>;
