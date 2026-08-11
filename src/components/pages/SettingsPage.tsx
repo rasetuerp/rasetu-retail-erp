@@ -1157,7 +1157,7 @@ function BackupWorkflowCard() {
   }
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => void load());
     if (!window.rasetu) return;
     return window.rasetu.backup.onStatus((payload) => {
       setSettings(payload.settings);
