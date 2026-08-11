@@ -667,6 +667,7 @@ function AppShell() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloaded' | 'error'>('idle');
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [refreshingApp, setRefreshingApp] = useState(false);
   const [appVersion, setAppVersion] = useState('0.1.3');
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
@@ -737,6 +738,22 @@ function AppShell() {
     await window.rasetu.installUpdate();
   }
 
+  async function refreshApp() {
+    if (refreshingApp) return;
+    setRefreshingApp(true);
+    setAlertsOpen(false);
+    setNotepadOpen(false);
+    setProfileMenuOpen(false);
+    try {
+      await window.rasetu?.restartBackend();
+    } catch {
+      // Reload the UI even if the backend restart was unavailable; this button
+      // is meant as a quick recovery action when the screen feels stuck.
+    } finally {
+      window.location.reload();
+    }
+  }
+
   // No session → Setup Wizard / Login gate (docs/SCOPE.md #1). No sidebar until
   // a company + admin account exist.
   if (!session) {
@@ -791,6 +808,16 @@ function AppShell() {
         </button>
         <img src={BRAND_LOGO_DARK} alt="RaSetu" style={{ height: 26, display: 'block' }} />
         <div style={{ flex: 1 }} />
+
+        <button
+          onClick={() => void refreshApp()}
+          disabled={refreshingApp}
+          title="Refresh App"
+          aria-label="Refresh app"
+          style={{ ...topBarIconBtn(false), opacity: refreshingApp ? 0.65 : 1, cursor: refreshingApp ? 'wait' : 'pointer' }}
+        >
+          <RefreshCw size={18} style={{ transform: refreshingApp ? 'rotate(180deg)' : undefined, transition: 'transform 180ms ease' }} />
+        </button>
 
         <AlertsBell
           open={alertsOpen}
