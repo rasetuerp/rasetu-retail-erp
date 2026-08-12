@@ -82,6 +82,11 @@ function salePriceFromMrp(mrp: number, discountPct: number) {
   return mrp * (1 - clampDiscount(discountPct) / 100);
 }
 
+function discountFromSalePrice(mrp: number, sellingRate: number) {
+  if (!(mrp > 0)) return 0;
+  return clampDiscount(((mrp - sellingRate) / mrp) * 100);
+}
+
 function defaultDueDateStr() {
   const d = new Date();
   d.setDate(d.getDate() + 15);
@@ -775,6 +780,12 @@ export function BillingPage({
     if (newItemRateRef.current) newItemRateRef.current.value = salePriceFromMrp(mrp, discountPct).toFixed(2);
   }
 
+  function syncNewItemDiscountFromSellingRate() {
+    const mrp = Number(newItemMrpRef.current?.value || 0);
+    const sellingRate = Number(newItemRateRef.current?.value || 0);
+    if (newItemDiscountRef.current) newItemDiscountRef.current.value = discountFromSalePrice(mrp, sellingRate).toFixed(2);
+  }
+
   async function handleAddItem() {
     if (!session) return;
     const sku = newItemSkuRef.current?.value.trim();
@@ -1052,7 +1063,7 @@ export function BillingPage({
                 <Field label="Purchase rate" innerRef={newItemPurchaseRateRef} type="number" placeholder="0" />
                 <Field label="MRP" innerRef={newItemMrpRef} type="number" placeholder="0" onChange={handleNewItemMrpChange} />
                 <Field label="Default disc %" innerRef={newItemDiscountRef} type="number" placeholder="0" onChange={syncNewItemSellingRate} />
-                <Field label="Selling rate" innerRef={newItemRateRef} type="number" placeholder="auto from MRP" />
+                <Field label="Selling rate" innerRef={newItemRateRef} type="number" placeholder="auto from MRP" onChange={syncNewItemDiscountFromSellingRate} />
                 <Field label="Opening stock" innerRef={newItemStockRef} type="number" placeholder="0" />
                 <Field label="Min stock" innerRef={newItemMinStockRef} type="number" placeholder="0" />
                 <Field label="HSN (optional)" innerRef={newItemHsnRef} placeholder="e.g. 6109" />
@@ -1260,7 +1271,7 @@ export function BillingPage({
                 <div style={{ display: 'flex', justifyContent: 'space-between', width: 200, fontSize: 12, color: color.inkFaint }}>
                   <span>SGST</span><span style={{ fontFamily: theme.mono }}>₹{money(preview.sgst)}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: 200, fontSize: 12, color: color.inkFaint }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: 420, fontSize: 12, color: color.inkFaint }}>
                   <span>Bill Discount <span style={{ fontSize: 10, color: color.inkFaint }}>({activeBillDiscountLabel})</span></span>
                   <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <span style={{ fontSize: 11 }}>Percent</span>
@@ -1281,7 +1292,7 @@ export function BillingPage({
                         }
                         setCartGen((g) => g + 1);
                       }}
-                      style={cellInputStyle(38, 'right')}
+                      style={cellInputStyle(62, 'right')}
                     />
                     <span style={{ fontSize: 11 }}>Rupees</span>
                     <input
@@ -1301,7 +1312,7 @@ export function BillingPage({
                         }
                         setCartGen((g) => g + 1);
                       }}
-                      style={cellInputStyle(48, 'right')}
+                      style={cellInputStyle(76, 'right')}
                     />
                   </span>
                 </div>

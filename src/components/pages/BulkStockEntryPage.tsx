@@ -174,6 +174,13 @@ export function BulkStockEntryPage() {
     if (sellingRateRef.current) sellingRateRef.current.value = (mrp * (1 - discountPct / 100)).toFixed(2);
   }
 
+  function syncDiscountFromSellingRate() {
+    const mrp = Number(mrpRef.current?.value || 0);
+    const sellingRate = Number(sellingRateRef.current?.value || 0);
+    const discountPct = mrp > 0 ? clampDiscount(((mrp - sellingRate) / mrp) * 100) : 0;
+    if (defaultDiscountRef.current) defaultDiscountRef.current.value = discountPct.toFixed(2);
+  }
+
   function updateRow(tempId: number, patch: Partial<BulkRow>) {
     setRows((prev) => prev.map((r) => (r.tempId === tempId ? { ...r, ...patch } : r)));
   }
@@ -307,7 +314,7 @@ export function BulkStockEntryPage() {
           <label style={labelStyle}>Purchase rate<input ref={purchaseRateRef} defaultValue="" type="number" style={inputStyle} /></label>
           <label style={labelStyle}>MRP<input ref={mrpRef} defaultValue="" type="number" style={inputStyle} onChange={handleMrpChange} /></label>
           <label style={labelStyle}>Default disc %<input ref={defaultDiscountRef} defaultValue="" type="number" placeholder="0" style={inputStyle} onChange={syncSellingRate} /></label>
-          <label style={labelStyle}>Selling rate<input ref={sellingRateRef} defaultValue="" type="number" placeholder="auto from MRP" style={inputStyle} /></label>
+          <label style={labelStyle}>Selling rate<input ref={sellingRateRef} defaultValue="" type="number" placeholder="auto from MRP" style={inputStyle} onChange={syncDiscountFromSellingRate} /></label>
           <label style={labelStyle}>HSN (optional)<input ref={hsnRef} defaultValue="" placeholder="e.g. 6109" style={inputStyle} /></label>
           <label style={labelStyle}>
             GST %

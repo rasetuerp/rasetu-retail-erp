@@ -77,6 +77,11 @@ function salePriceFromMrp(mrp: number, discountPct: number) {
   return mrp * (1 - clampDiscount(discountPct) / 100);
 }
 
+function discountFromSalePrice(mrp: number, sellingRate: number) {
+  if (!(mrp > 0)) return 0;
+  return clampDiscount(((mrp - sellingRate) / mrp) * 100);
+}
+
 // Round 22 — a deterministic color per category name (no new data, no
 // per-category settings) stands in for GoBilling's per-item photo thumbnail,
 // which RaSetu's Item model has no field for yet.
@@ -114,9 +119,15 @@ export function ItemMasterPage() {
   const [adjustingItemId, setAdjustingItemId] = useState<string | null>(null);
   const [adjustError, setAdjustError] = useState<string | null>(null);
   const [removingItemId, setRemovingItemId] = useState<string | null>(null);
+  const [stockSearch, setStockSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [stockFilter, setStockFilter] = useState<'all' | 'in' | 'low' | 'out'>('all');
+  const [discountFilter, setDiscountFilter] = useState<'all' | 'discounted' | 'no-discount'>('all');
+  const [bulkUpdatingDiscount, setBulkUpdatingDiscount] = useState(false);
   const adjustQtyRef = useRef<HTMLInputElement>(null);
   const adjustTypeRef = useRef<HTMLSelectElement>(null);
   const adjustReasonRef = useRef<HTMLInputElement>(null);
+  const bulkDiscountRef = useRef<HTMLInputElement>(null);
 
   const skuRef = useRef<HTMLInputElement>(null);
   // Round 13 — Auto keeps the SKU field read-only and filled from /next-sku
@@ -332,10 +343,22 @@ export function ItemMasterPage() {
     if (sellingRateRef.current) sellingRateRef.current.value = salePriceFromMrp(mrp, discountPct).toFixed(2);
   }
 
+  function syncDiscountFromSellingRate() {
+    const mrp = Number(mrpRef.current?.value || 0);
+    const sellingRate = Number(sellingRateRef.current?.value || 0);
+    if (defaultDiscountRef.current) defaultDiscountRef.current.value = discountFromSalePrice(mrp, sellingRate).toFixed(2);
+  }
+
   function syncEditSellingRate() {
     const mrp = Number(editMrpRef.current?.value || 0);
     const discountPct = clampDiscount(Number(editDefaultDiscountRef.current?.value || 0));
     if (editSellingRateRef.current) editSellingRateRef.current.value = salePriceFromMrp(mrp, discountPct).toFixed(2);
+  }
+
+  function syncEditDiscountFromSellingRate() {
+    const mrp = Number(editMrpRef.current?.value || 0);
+    const sellingRate = Number(editSellingRateRef.current?.value || 0);
+    if (editDefaultDiscountRef.current) editDefaultDiscountRef.current.value = discountFromSalePrice(mrp, sellingRate).toFixed(2);
   }
 
   async function handleSaveEdit(itemId: string) {
@@ -404,11 +427,65 @@ export function ItemMasterPage() {
     }
   }
 
+  async function handleApplyDiscountToFiltered() {
+    if (!session || filteredItems.length === 0) return;
+    const discountPct = clampDiscount(Number(bulkDiscountRef.current?.value ?? 0));
+    const ok = window.confirm(`Apply ${discountPct.toFixed(2)}% discount to ${filteredItems.length} visible item(s)?\n\nThis updates each item's default discount and selling rate. Existing posted bills are not changed.`);
+    if (!ok) return;
+    setBulkUpdatingDiscount(true);
+    setError(null);
+    try {
+      await Promise.all(
+        filteredItems.map((item) =>
+          apiRequest(`/companies/${session.companyId}/items/${item.id}`, {
+            method: 'PATCH',
+            token: session.token,
+            body: {
+              defaultDiscountPct: discountPct,
+              sellingRate: salePriceFromMrp(Number(item.mrp), discountPct),
+            },
+          })
+        )
+      );
+      await loadItems();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to update discounts');
+    } finally {
+      setBulkUpdatingDiscount(false);
+    }
+  }
+
   const totalItems = items.length;
   const availableItems = items.filter((i) => Number(i.stockQty) > 0).length;
   const lowStockCount = items.filter((i) => Number(i.stockQty) <= Number(i.minStock)).length;
   const categoryCount = new Set(items.map((i) => i.category).filter((c): c is string => !!c)).size;
   const totalStockValue = items.reduce((sum, i) => sum + Number(i.stockQty) * Number(i.purchaseRate), 0);
+  const categoryOptions = [...new Set(items.map((i) => i.category).filter((c): c is string => !!c))].sort((a, b) => a.localeCompare(b));
+  const filteredItems = items.filter((item) => {
+    const q = stockSearch.trim().toLowerCase();
+    const stockQty = Number(item.stockQty);
+    const minStock = Number(item.minStock);
+    const discountPct = Number(item.defaultDiscountPct || 0);
+    const matchesSearch =
+      !q ||
+      item.sku.toLowerCase().includes(q) ||
+      item.barcode?.toLowerCase().includes(q) ||
+      item.category?.toLowerCase().includes(q) ||
+      item.brand?.toLowerCase().includes(q) ||
+      item.size?.toLowerCase().includes(q) ||
+      item.color?.toLowerCase().includes(q);
+    const matchesCategory = categoryFilter === 'all' || item.category === categoryFilter;
+    const matchesStock =
+      stockFilter === 'all' ||
+      (stockFilter === 'out' && stockQty <= 0) ||
+      (stockFilter === 'low' && stockQty > 0 && stockQty <= minStock) ||
+      (stockFilter === 'in' && stockQty > minStock);
+    const matchesDiscount =
+      discountFilter === 'all' ||
+      (discountFilter === 'discounted' && discountPct > 0) ||
+      (discountFilter === 'no-discount' && discountPct <= 0);
+    return matchesSearch && matchesCategory && matchesStock && matchesDiscount;
+  });
 
   return (
     <div style={{ padding: 28, fontFamily: 'Segoe UI, system-ui, sans-serif' }}>
@@ -502,7 +579,7 @@ export function ItemMasterPage() {
             <QuickField label="Purchase Rate" innerRef={purchaseRateRef} style={numberInputStyle} type="number" />
             <QuickField label="MRP" innerRef={mrpRef} style={numberInputStyle} type="number" onChange={handleMrpChange} />
             <QuickField label="Default Disc %" innerRef={defaultDiscountRef} style={numberInputStyle} type="number" onChange={syncSellingRate} />
-            <QuickField label="Selling Rate" innerRef={sellingRateRef} style={numberInputStyle} type="number" />
+            <QuickField label="Selling Rate" innerRef={sellingRateRef} style={numberInputStyle} type="number" onChange={syncDiscountFromSellingRate} />
             <label style={labelStyle}>
               HSN (optional)
               <input ref={hsnRef} defaultValue="" placeholder="e.g. 6109 (optional, can add later)" style={{ ...textInputStyle, width: 190 }} />
@@ -566,6 +643,72 @@ export function ItemMasterPage() {
         </div>
       )}
 
+      <div style={{ background: color.paperRaised, border: `1px solid ${color.line}`, borderRadius: theme.radius, padding: 14, marginBottom: 12, boxShadow: theme.shadowSm }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+          <label style={labelStyle}>
+            Search stock
+            <input
+              value={stockSearch}
+              onChange={(e) => setStockSearch(e.currentTarget.value)}
+              placeholder="SKU, category, brand, size, colour, barcode"
+              style={{ ...textInputStyle, width: 280 }}
+            />
+          </label>
+          <label style={labelStyle}>
+            Category
+            <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.currentTarget.value)} style={{ ...textInputStyle, width: 160 }}>
+              <option value="all">All categories</option>
+              {categoryOptions.map((category) => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
+          </label>
+          <label style={labelStyle}>
+            Stock
+            <select value={stockFilter} onChange={(e) => setStockFilter(e.currentTarget.value as typeof stockFilter)} style={{ ...textInputStyle, width: 130 }}>
+              <option value="all">All stock</option>
+              <option value="in">In stock</option>
+              <option value="low">Low stock</option>
+              <option value="out">Out of stock</option>
+            </select>
+          </label>
+          <label style={labelStyle}>
+            Discount
+            <select value={discountFilter} onChange={(e) => setDiscountFilter(e.currentTarget.value as typeof discountFilter)} style={{ ...textInputStyle, width: 150 }}>
+              <option value="all">All discounts</option>
+              <option value="discounted">Discounted only</option>
+              <option value="no-discount">No discount</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              setStockSearch('');
+              setCategoryFilter('all');
+              setStockFilter('all');
+              setDiscountFilter('all');
+            }}
+            style={{ padding: '9px 12px', background: 'transparent', border: `1px solid ${color.line}`, borderRadius: theme.radiusSm, cursor: 'pointer', color: color.inkSoft }}
+          >
+            Clear filters
+          </button>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+            <label style={labelStyle}>
+              Offer discount %
+              <input ref={bulkDiscountRef} defaultValue="" type="number" placeholder="e.g. 20" style={{ ...numberInputStyle, width: 120 }} />
+            </label>
+            <button
+              type="button"
+              onClick={() => void handleApplyDiscountToFiltered()}
+              disabled={bulkUpdatingDiscount || filteredItems.length === 0}
+              style={{ padding: '9px 14px', background: color.ledger, color: '#fff', border: 'none', borderRadius: theme.radiusSm, cursor: filteredItems.length === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600 }}
+            >
+              {bulkUpdatingDiscount ? 'Updating...' : `Apply to visible (${filteredItems.length})`}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <table style={{ width: '100%', borderCollapse: 'collapse', background: color.paperRaised, border: `1px solid ${color.line}`, borderRadius: theme.radius, boxShadow: theme.shadowSm }}>
         <thead>
           <tr style={{ textAlign: 'left', borderBottom: `2px solid ${color.line}`, fontSize: 12.5, color: color.inkFaint, fontFamily: theme.mono, textTransform: 'uppercase' }}>
@@ -587,10 +730,10 @@ export function ItemMasterPage() {
         <tbody>
           {loading ? (
             <tr><td colSpan={13} style={{ padding: 18, textAlign: 'center', color: color.inkFaint, fontSize: 13 }}>Loading…</td></tr>
-          ) : items.length === 0 ? (
-            <tr><td colSpan={13} style={{ padding: 18, textAlign: 'center', color: color.inkFaint, fontSize: 13 }}>No items yet - add one above.</td></tr>
+          ) : filteredItems.length === 0 ? (
+            <tr><td colSpan={13} style={{ padding: 18, textAlign: 'center', color: color.inkFaint, fontSize: 13 }}>{items.length === 0 ? 'No items yet - add one above.' : 'No items match the selected filters.'}</td></tr>
           ) : (
-            items.map((item) => (
+            filteredItems.map((item) => (
               <Fragment key={item.id}>
                 <tr style={{ borderTop: `1px solid ${color.lineSoft}`, fontSize: 14 }}>
                   <td style={{ padding: 10 }}>{item.sku}</td>
@@ -681,7 +824,7 @@ export function ItemMasterPage() {
                         </label>
                         <label style={labelStyle}>
                           Selling Rate
-                          <input ref={editSellingRateRef} defaultValue={item.sellingRate} type="number" style={numberInputStyle} />
+                          <input ref={editSellingRateRef} defaultValue={item.sellingRate} type="number" onChange={syncEditDiscountFromSellingRate} style={numberInputStyle} />
                         </label>
                         <label style={labelStyle}>
                           Barcode
