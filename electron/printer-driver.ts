@@ -33,6 +33,7 @@ export interface LabelElement {
   fontSize?: number;
   fontFamily?: string;
   fontWeight?: 'normal' | 'bold';
+  align?: 'left' | 'center' | 'right';
   barcodeType?: 'code128' | 'code39' | 'ean13' | 'upca';
   qrSize?: number;
   // Round 21 — 'image' elements arrive pre-dithered from the renderer (see
@@ -151,6 +152,11 @@ function fontForSize(sizePt = 10): string {
   if (sizePt <= 10) return '2';
   if (sizePt <= 14) return '3';
   return '4';
+}
+
+function textWidthDots(value: string, font: string): number {
+  const perChar = font === '1' ? 8 : font === '2' ? 12 : font === '3' ? 16 : 24;
+  return Math.max(0, value.length * perChar);
 }
 
 function estimateBarcodeModules(value: string, type: LabelElement['barcodeType'] = 'code128'): number {
@@ -273,6 +279,7 @@ export class TscPrinterDriver {
     const lines: string[] = [
       `SIZE ${width.toFixed(1)} mm,${height.toFixed(1)} mm`,
       `GAP ${gap.toFixed(1)} mm,0 mm`,
+      'CODEPAGE UTF-8',
       'DIRECTION 0',
       'REFERENCE 0,0',
       `DENSITY ${clamp(effectiveDarkness, 0, 15)}`,
@@ -290,7 +297,15 @@ export class TscPrinterDriver {
         if (!content) continue;
 
         const font = fontForSize(element.fontSize);
-        lines.push(`TEXT ${x},${y},"${font}",${transformed.rotation},1,1,"${content}"`);
+        const boxWidthDots = mmToDots(element.width || 0, this.profile.dpi);
+        const rawTextWidth = textWidthDots(resolveContent(element, data), font);
+        const alignedX =
+          element.align === 'right'
+            ? x + Math.max(0, boxWidthDots - rawTextWidth)
+            : element.align === 'center'
+              ? x + Math.max(0, Math.round((boxWidthDots - rawTextWidth) / 2))
+              : x;
+        lines.push(`TEXT ${alignedX},${y},"${font}",${transformed.rotation},1,1,"${content}"`);
         continue;
       }
 
@@ -336,7 +351,7 @@ export class TscPrinterDriver {
     }
 
     lines.push(`PRINT ${Math.max(1, copies)}`);
-    return Buffer.from(`${lines.join('\r\n')}\r\n`, 'ascii');
+    return Buffer.from(`${lines.join('\r\n')}\r\n`, 'utf8');
   }
 
   getSettings(): PrinterSettings {

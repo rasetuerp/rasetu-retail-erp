@@ -206,11 +206,31 @@ export function defaultElementsForSize(widthMm: number, heightMm: number): Desig
       mk({ type: 'barcode', xMm: widthMm * 0.53, yMm: 1, widthMm: widthMm * 0.45, heightMm: heightMm - 2, sourceKey: 'item.sku', barcodeType: 'code128' }),
     ];
   }
+  const pad = Math.max(2, widthMm * 0.06);
+  const rowH = Math.max(4, Math.min(6, heightMm * 0.08));
+  const labelW = Math.max(17, widthMm * 0.34);
+  const valueX = pad + labelW;
+  const valueW = widthMm - valueX - pad;
+  const headerH = Math.max(7, heightMm * 0.12);
+  const lineY1 = headerH + 4;
+  const rowStart = lineY1 + 3;
+  const mrpY = Math.min(heightMm - 25, rowStart + rowH * 5.15);
+  const barcodeY = Math.min(heightMm - 15, mrpY + Math.max(10, heightMm * 0.16));
   return [
-    mk({ type: 'text', xMm: 2, yMm: 2, widthMm: widthMm - 4, heightMm: heightMm * 0.15, fontSize: 7, sourceKey: 'item.category' }),
-    mk({ type: 'text', xMm: 2, yMm: heightMm * 0.2, widthMm: widthMm * 0.55, heightMm: heightMm * 0.18, fontSize: 8, sourceKey: 'item.sku' }),
-    mk({ type: 'text', xMm: widthMm * 0.58, yMm: heightMm * 0.2, widthMm: widthMm * 0.4, heightMm: heightMm * 0.18, fontSize: 9, bold: true, align: 'right', sourceKey: 'item.mrp' }),
-    mk({ type: 'barcode', xMm: widthMm * 0.1, yMm: heightMm * 0.45, widthMm: widthMm * 0.8, heightMm: heightMm * 0.45, sourceKey: 'item.sku', barcodeType: 'code128' }),
+    mk({ type: 'text', xMm: pad, yMm: 2, widthMm: widthMm - pad * 2, heightMm: headerH, fontSize: 14, bold: true, align: 'center', sourceKey: 'item.brand' }),
+    mk({ type: 'line', xMm: pad, yMm: lineY1, widthMm: widthMm - pad * 2, heightMm: 0.35 }),
+    mk({ type: 'text', xMm: pad, yMm: rowStart, widthMm: labelW, heightMm: rowH, fontSize: 8, bold: true, content: 'Category:' }),
+    mk({ type: 'text', xMm: valueX, yMm: rowStart, widthMm: valueW, heightMm: rowH, fontSize: 8, align: 'right', sourceKey: 'item.category' }),
+    mk({ type: 'text', xMm: pad, yMm: rowStart + rowH, widthMm: labelW, heightMm: rowH, fontSize: 8, bold: true, content: 'Type:' }),
+    mk({ type: 'text', xMm: valueX, yMm: rowStart + rowH, widthMm: valueW, heightMm: rowH, fontSize: 8, align: 'right', sourceKey: 'item.itemType' }),
+    mk({ type: 'text', xMm: pad, yMm: rowStart + rowH * 2, widthMm: labelW, heightMm: rowH, fontSize: 8, bold: true, content: 'Size:' }),
+    mk({ type: 'text', xMm: valueX, yMm: rowStart + rowH * 2, widthMm: valueW, heightMm: rowH, fontSize: 10, align: 'right', sourceKey: 'item.size' }),
+    mk({ type: 'text', xMm: pad, yMm: rowStart + rowH * 3, widthMm: labelW, heightMm: rowH, fontSize: 8, bold: true, content: 'Color:' }),
+    mk({ type: 'text', xMm: valueX, yMm: rowStart + rowH * 3, widthMm: valueW, heightMm: rowH, fontSize: 8, align: 'right', sourceKey: 'item.color' }),
+    mk({ type: 'line', xMm: pad, yMm: rowStart + rowH * 4.45, widthMm: widthMm - pad * 2, heightMm: 0.25 }),
+    mk({ type: 'text', xMm: pad, yMm: mrpY, widthMm: widthMm - pad * 2, heightMm: Math.max(7, heightMm * 0.12), fontSize: 14, bold: true, align: 'center', showLabel: true, displayLabel: 'MRP', sourceKey: 'item.mrp' }),
+    mk({ type: 'text', xMm: pad, yMm: mrpY + Math.max(7, heightMm * 0.12), widthMm: widthMm - pad * 2, heightMm: 4, fontSize: 6, align: 'center', content: '(Incl. of all taxes)' }),
+    mk({ type: 'barcode', xMm: pad, yMm: barcodeY, widthMm: widthMm - pad * 2, heightMm: Math.max(10, heightMm - barcodeY - 3), sourceKey: 'item.sku', barcodeType: 'code128' }),
   ];
 }
 
@@ -234,6 +254,14 @@ export type PresetTemplate = {
 };
 
 export const PRESET_GALLERY: PresetTemplate[] = [
+  {
+    id: 'professional-mrp-label',
+    name: 'Professional MRP Label',
+    description: 'Reference-style garment label with centered brand, aligned details, large MRP with rupee symbol, tax note and barcode.',
+    widthMm: 50,
+    heightMm: 75,
+    buildElements: () => defaultElementsForSize(50, 75),
+  },
   {
     id: 'compact-barcode',
     name: 'Compact Barcode Tag',
@@ -371,6 +399,7 @@ export async function buildPrinterTemplate(draft: LabelTemplateDto) {
         content: el.sourceKey ?? el.content ?? '',
         fontSize: el.fontSize,
         fontWeight: el.bold ? ('bold' as const) : ('normal' as const),
+        align: el.align,
         barcodeType: el.barcodeType,
         qrSize: el.type === 'qrcode' ? Math.max(1, Math.round(el.widthMm / 4)) : undefined,
       };

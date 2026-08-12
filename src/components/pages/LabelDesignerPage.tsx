@@ -758,14 +758,16 @@ function SetupModal({
             onChange={(e) => {
               const tpl = PRESET_GALLERY.find((t) => t.id === e.target.value);
               if (!tpl) return;
+              const replaceLayout = !draft.id || window.confirm('Replace this template layout with the selected professional template? Your current elements will be replaced after you click OK.');
+              if (!replaceLayout) return;
               setDraft((p) => ({
                 ...p,
                 widthMm: tpl.widthMm,
                 heightMm: tpl.heightMm,
                 // Same rule as the Size preset picker above — never
                 // clobber a template that's already been saved.
-                elements: p.id ? p.elements : tpl.buildElements(),
-                printConfig: p.id ? p.printConfig : { ...p.printConfig, loopZone: tpl.loopZone },
+                elements: tpl.buildElements(),
+                printConfig: { ...p.printConfig, loopZone: tpl.loopZone },
               }));
               setSelectedElementId(null);
             }}

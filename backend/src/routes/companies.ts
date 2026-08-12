@@ -146,10 +146,10 @@ companiesRouter.post(
     await companyDb.labelTemplate.create({
       data: {
         companyId: company.id,
-        name: 'Compact Tag',
+        name: 'Professional MRP Label',
         isDefault: true,
-        widthMm: 63,
-        heightMm: 11,
+        widthMm: 50,
+        heightMm: 75,
         elements: JSON.stringify([
           // Round 14 fix — this used to say type: 'field', which was never a
           // real ElementType (labelPrint.ts's union is 'text'/'barcode'/
@@ -158,9 +158,20 @@ companiesRouter.post(
           // result — they matched no branch in the canvas renderer or the
           // sidebar's editor-panel type check, so they never showed preview
           // text and couldn't be edited at all.
-          { id: 'sku', type: 'text', sourceKey: 'item.sku', xMm: 1, yMm: 0.5, widthMm: 35, heightMm: 3, fontSize: 6 },
-          { id: 'mrp', type: 'text', sourceKey: 'item.mrp', xMm: 37, yMm: 0.5, widthMm: 25, heightMm: 3, fontSize: 6, align: 'right', showLabel: true, displayLabel: 'MRP' },
-          { id: 'barcode', type: 'barcode', sourceKey: 'item.sku', barcodeType: 'code128', xMm: 1, yMm: 4, widthMm: 61, heightMm: 6 },
+          { id: 'brand', type: 'text', sourceKey: 'item.brand', xMm: 3, yMm: 2, widthMm: 44, heightMm: 9, fontSize: 14, bold: true, align: 'center' },
+          { id: 'line-top', type: 'line', xMm: 3, yMm: 13, widthMm: 44, heightMm: 0.35 },
+          { id: 'category-label', type: 'text', content: 'Category:', xMm: 3, yMm: 16, widthMm: 17, heightMm: 5, fontSize: 8, bold: true },
+          { id: 'category-value', type: 'text', sourceKey: 'item.category', xMm: 20, yMm: 16, widthMm: 27, heightMm: 5, fontSize: 8, align: 'right' },
+          { id: 'type-label', type: 'text', content: 'Type:', xMm: 3, yMm: 21, widthMm: 17, heightMm: 5, fontSize: 8, bold: true },
+          { id: 'type-value', type: 'text', sourceKey: 'item.itemType', xMm: 20, yMm: 21, widthMm: 27, heightMm: 5, fontSize: 8, align: 'right' },
+          { id: 'size-label', type: 'text', content: 'Size:', xMm: 3, yMm: 26, widthMm: 17, heightMm: 5, fontSize: 8, bold: true },
+          { id: 'size-value', type: 'text', sourceKey: 'item.size', xMm: 20, yMm: 26, widthMm: 27, heightMm: 5, fontSize: 10, align: 'right' },
+          { id: 'color-label', type: 'text', content: 'Color:', xMm: 3, yMm: 31, widthMm: 17, heightMm: 5, fontSize: 8, bold: true },
+          { id: 'color-value', type: 'text', sourceKey: 'item.color', xMm: 20, yMm: 31, widthMm: 27, heightMm: 5, fontSize: 8, align: 'right' },
+          { id: 'line-mid', type: 'line', xMm: 3, yMm: 38, widthMm: 44, heightMm: 0.25 },
+          { id: 'mrp', type: 'text', sourceKey: 'item.mrp', xMm: 3, yMm: 41, widthMm: 44, heightMm: 9, fontSize: 14, bold: true, align: 'center', showLabel: true, displayLabel: 'MRP' },
+          { id: 'tax-note', type: 'text', content: '(Incl. of all taxes)', xMm: 3, yMm: 51, widthMm: 44, heightMm: 4, fontSize: 6, align: 'center' },
+          { id: 'barcode', type: 'barcode', sourceKey: 'item.sku', barcodeType: 'code128', xMm: 3, yMm: 58, widthMm: 44, heightMm: 14 },
         ]),
         printConfig: JSON.stringify({ darkness: 8, gapMm: 2, xOffsetMm: 0, yOffsetMm: 0, dpi: 203 }),
       },
