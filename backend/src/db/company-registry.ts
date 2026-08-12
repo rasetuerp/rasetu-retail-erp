@@ -99,7 +99,14 @@ async function configureCompanyClient(client: CompanyPrismaClient): Promise<void
   await client.$queryRawUnsafe('PRAGMA journal_mode = WAL');
   await client.$queryRawUnsafe('PRAGMA synchronous = NORMAL');
   await client.$queryRawUnsafe('PRAGMA foreign_keys = ON');
+  await migrateItemDefaultDiscount(client);
   await migrateCreditNotePartyNullable(client);
+}
+
+async function migrateItemDefaultDiscount(client: CompanyPrismaClient): Promise<void> {
+  const columns = await client.$queryRawUnsafe<Array<{ name: string }>>('PRAGMA table_info("Item")');
+  if (columns.some((column) => column.name === 'defaultDiscountPct')) return;
+  await client.$executeRawUnsafe('ALTER TABLE "Item" ADD COLUMN "defaultDiscountPct" DECIMAL NOT NULL DEFAULT 0');
 }
 
 async function migrateCreditNotePartyNullable(client: CompanyPrismaClient): Promise<void> {

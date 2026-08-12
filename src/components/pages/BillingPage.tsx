@@ -12,7 +12,7 @@ import { PaymentSplitPanel } from '../PaymentSplitPanel';
 // RULES.md #2: types declared inline. Round 2 Step 2 — product grid, qty
 // stepper, held-bill tabs, payment tiles, and a live GST-aware total
 // (src/lib/gstPreview.ts) replacing the flat-sum placeholder from Round 1.
-type Item = { id: string; sku: string; hsn: string | null; category: string | null; size: string | null; color: string | null; mrp: string; sellingRate: string; gstRate: string; gstInclusive: boolean; stockQty: string };
+type Item = { id: string; sku: string; hsn: string | null; category: string | null; size: string | null; color: string | null; mrp: string; sellingRate: string; defaultDiscountPct: string; gstRate: string; gstInclusive: boolean; stockQty: string };
 // Round 5 — phone/address surfaced for the inline customer search panel;
 // dob/anniversary/notes aren't needed on this page, only at creation time.
 type Party = { id: string; name: string; type: 'CUSTOMER' | 'SUPPLIER'; balance: string; creditLimit: string | null; phone: string | null; address: string | null };
@@ -71,6 +71,15 @@ const PRIMARY_AMBER = '#E07B1F';
 const MONEY_FMT: Intl.NumberFormatOptions = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
 function money(n: number | string) {
   return Number(n).toLocaleString('en-IN', MONEY_FMT);
+}
+
+function clampDiscount(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
+function salePriceFromMrp(mrp: number, discountPct: number) {
+  return mrp * (1 - clampDiscount(discountPct) / 100);
 }
 
 function defaultDueDateStr() {
@@ -145,6 +154,7 @@ export function BillingPage({
   const newItemPurchaseRateRef = useRef<HTMLInputElement>(null);
   const newItemMrpRef = useRef<HTMLInputElement>(null);
   const newItemRateRef = useRef<HTMLInputElement>(null);
+  const newItemDiscountRef = useRef<HTMLInputElement>(null);
   const newItemStockRef = useRef<HTMLInputElement>(null);
   const newItemMinStockRef = useRef<HTMLInputElement>(null);
   const newItemHsnRef = useRef<HTMLInputElement>(null);
@@ -176,6 +186,7 @@ export function BillingPage({
   // already accepts both simultaneously (invoiceBodySchema.discountPct/Amt).
   const [billDiscountPct, setBillDiscountPct] = useState(0);
   const [billDiscountAmt, setBillDiscountAmt] = useState(0);
+  const [billDiscountMode, setBillDiscountMode] = useState<'none' | 'pct' | 'amount'>('none');
   // Forces the uncontrolled discount inputs below to remount (and thus
   // re-read defaultValue) whenever resetCart() zeroes them out from code —
   // same problem qty/rate cells solve today with key={line.qty}.
@@ -301,16 +312,18 @@ export function BillingPage({
         return prev;
       }
       setError(null);
+      const mrp = Number(item.mrp) || Number(item.sellingRate) || 0;
+      const discountPct = clampDiscount(Number(item.defaultDiscountPct ?? 0));
       const gstRate = Number(item.gstRate);
       // Round 6 — the cart always stores an ex-tax unit rate from here on
       // ("Rate without tax"), regardless of how the item's own MRP/selling
       // rate is configured. An item priced inclusive gets converted once,
       // at add-time; gstInclusive: false is then permanent for this line, so
       // gst-calc.ts's existing exclusive branch (unchanged) does the rest.
-      const rate = item.gstInclusive ? Number(item.sellingRate) / (1 + gstRate / 100) : Number(item.sellingRate);
+      const rate = mrp;
       return [
         ...prev,
-        { itemId: item.id, sku: item.sku, hsn: item.hsn, category: item.category, qty: 1, rate, mrp: Number(item.mrp), gstRate, gstInclusive: false, discountPct: 0 },
+        { itemId: item.id, sku: item.sku, hsn: item.hsn, category: item.category, qty: 1, rate, mrp, gstRate, gstInclusive: true, discountPct },
       ];
     });
     // Keep the cashier scanning without a re-click — the whole point of a
@@ -349,15 +362,14 @@ export function BillingPage({
     setCart((prev) =>
       prev.map((l) => {
         if (l.itemId !== itemId) return l;
-        const gstRate = l.gstRateOverride ?? l.gstRate;
-        const divisor = l.qty * (1 - l.discountPct / 100) * (1 + gstRate / 100);
+        const divisor = l.qty * (1 - clampDiscount(l.discountPct) / 100) * (l.gstInclusive ? 1 : 1 + (l.gstRateOverride ?? l.gstRate) / 100);
         return { ...l, rate: divisor > 0 ? amount / divisor : 0 };
       })
     );
   }
 
   function updateLineDiscount(itemId: string, discountPct: number) {
-    setCart((prev) => prev.map((l) => (l.itemId === itemId ? { ...l, discountPct } : l)));
+    setCart((prev) => prev.map((l) => (l.itemId === itemId ? { ...l, discountPct: clampDiscount(discountPct) } : l)));
   }
 
   // Editing MRP recalculates GST% through the normal, already-compliant slab
@@ -383,6 +395,7 @@ export function BillingPage({
     setShowAddPerson(false);
     setBillDiscountPct(0);
     setBillDiscountAmt(0);
+    setBillDiscountMode('none');
     setCartGen((g) => g + 1);
     setEditingId(null);
     setEditingPartyId(null);
@@ -563,6 +576,7 @@ export function BillingPage({
     setEditingPartyId(null);
     setBillDiscountPct(Number(invoice.discountPct));
     setBillDiscountAmt(Number(invoice.discountAmt));
+    setBillDiscountMode(Number(invoice.discountAmt) > 0 ? 'amount' : Number(invoice.discountPct) > 0 ? 'pct' : 'none');
     setCartGen((g) => g + 1);
     setCart(
       invoice.items.map((line) => {
@@ -604,6 +618,7 @@ export function BillingPage({
         setSelectedParty(null);
         setBillDiscountPct(Number(invoice.discountPct));
         setBillDiscountAmt(Number(invoice.discountAmt));
+        setBillDiscountMode(Number(invoice.discountAmt) > 0 ? 'amount' : Number(invoice.discountPct) > 0 ? 'pct' : 'none');
         setCartGen((g) => g + 1);
         setCart(invoice.items.map((line) => {
           const item = items.find((i) => i.id === line.itemId);
@@ -749,9 +764,15 @@ export function BillingPage({
   }
 
   function handleNewItemMrpChange(e: React.ChangeEvent<HTMLInputElement>) {
-    if (newItemGstManuallySet) return;
     const mrp = Number(e.currentTarget.value) || 0;
-    setNewItemGstRateValue(String(mrp <= slabRule.thresholdMrp ? slabRule.rateBelowOrEqual : slabRule.rateAbove));
+    if (!newItemGstManuallySet) setNewItemGstRateValue(String(mrp <= slabRule.thresholdMrp ? slabRule.rateBelowOrEqual : slabRule.rateAbove));
+    syncNewItemSellingRate();
+  }
+
+  function syncNewItemSellingRate() {
+    const mrp = Number(newItemMrpRef.current?.value || 0);
+    const discountPct = clampDiscount(Number(newItemDiscountRef.current?.value || 0));
+    if (newItemRateRef.current) newItemRateRef.current.value = salePriceFromMrp(mrp, discountPct).toFixed(2);
   }
 
   async function handleAddItem() {
@@ -777,6 +798,7 @@ export function BillingPage({
           purchaseRate: Number(newItemPurchaseRateRef.current?.value || 0),
           mrp,
           sellingRate: Number(newItemRateRef.current?.value || mrp),
+          defaultDiscountPct: clampDiscount(Number(newItemDiscountRef.current?.value || 0)),
           openingStock: Number(newItemStockRef.current?.value || 0),
           minStock: Number(newItemMinStockRef.current?.value || 0),
           hsn: newItemHsnRef.current?.value.trim() || undefined,
@@ -801,6 +823,7 @@ export function BillingPage({
       if (newItemPurchaseRateRef.current) newItemPurchaseRateRef.current.value = '';
       if (newItemMrpRef.current) newItemMrpRef.current.value = '';
       if (newItemRateRef.current) newItemRateRef.current.value = '';
+      if (newItemDiscountRef.current) newItemDiscountRef.current.value = '';
       if (newItemStockRef.current) newItemStockRef.current.value = '';
       if (newItemMinStockRef.current) newItemMinStockRef.current.value = '';
       if (newItemHsnRef.current) newItemHsnRef.current.value = '';
@@ -822,6 +845,7 @@ export function BillingPage({
   }
 
   const preview = previewInvoiceTotals(cart, slabRule, billDiscountPct, billDiscountAmt);
+  const activeBillDiscountLabel = billDiscountMode === 'pct' ? 'percent active' : billDiscountMode === 'amount' ? 'rupees active' : 'none';
 
   return (
     <div style={{ padding: 28, fontFamily: 'Segoe UI, system-ui, sans-serif' }}>
@@ -1027,7 +1051,8 @@ export function BillingPage({
                 </label>
                 <Field label="Purchase rate" innerRef={newItemPurchaseRateRef} type="number" placeholder="0" />
                 <Field label="MRP" innerRef={newItemMrpRef} type="number" placeholder="0" onChange={handleNewItemMrpChange} />
-                <Field label="Selling rate" innerRef={newItemRateRef} type="number" placeholder="defaults to MRP" />
+                <Field label="Default disc %" innerRef={newItemDiscountRef} type="number" placeholder="0" onChange={syncNewItemSellingRate} />
+                <Field label="Selling rate" innerRef={newItemRateRef} type="number" placeholder="auto from MRP" />
                 <Field label="Opening stock" innerRef={newItemStockRef} type="number" placeholder="0" />
                 <Field label="Min stock" innerRef={newItemMinStockRef} type="number" placeholder="0" />
                 <Field label="HSN (optional)" innerRef={newItemHsnRef} placeholder="e.g. 6109" />
@@ -1112,8 +1137,9 @@ export function BillingPage({
                   <tr style={{ textAlign: 'left', fontSize: 11.5, color: color.inkFaint, fontFamily: theme.mono, textTransform: 'uppercase', borderBottom: `1px solid ${color.line}` }}>
                     <th style={{ padding: 6 }}>SKU</th>
                     <th style={{ padding: 6, textAlign: 'right' }}>Qty</th>
-                    <th style={{ padding: 6, textAlign: 'right' }}>Rate (excl. GST)</th>
-                    <th style={{ padding: 6, textAlign: 'right' }}>Disc%</th>
+                    <th style={{ padding: 6, textAlign: 'right' }}>MRP</th>
+                    <th style={{ padding: 6, textAlign: 'right' }}>Disc %</th>
+                    <th style={{ padding: 6, textAlign: 'right' }}>Sale Price</th>
                     <th style={{ padding: 6, textAlign: 'right' }}>GST%</th>
                     <th style={{ padding: 6, textAlign: 'right' }}>Amount (incl. GST)</th>
                     <th style={{ padding: 6 }}></th>
@@ -1122,8 +1148,8 @@ export function BillingPage({
                 <tbody>
                   {cart.map((line) => {
                     const effectiveGstRate = line.gstRateOverride ?? line.gstRate;
-                    const lineTaxable = line.qty * line.rate * (1 - line.discountPct / 100);
-                    const lineAmount = lineTaxable * (1 + effectiveGstRate / 100);
+                    const salePrice = salePriceFromMrp(line.rate, line.discountPct);
+                    const lineAmount = line.gstInclusive ? line.qty * salePrice : line.qty * salePrice * (1 + effectiveGstRate / 100);
                     return (
                       <tr key={line.itemId} style={{ borderTop: `1px solid ${color.lineSoft}`, fontSize: 14 }}>
                         <td style={{ padding: 6 }}>
@@ -1164,6 +1190,9 @@ export function BillingPage({
                             onBlur={(e) => updateLineDiscount(line.itemId, Number(e.currentTarget.value) || 0)}
                             style={cellInputStyle(56, 'right')}
                           />
+                        </td>
+                        <td style={{ padding: 6, textAlign: 'right', fontFamily: theme.mono }}>
+                          ₹{money(salePrice)}
                         </td>
                         <td style={{ padding: 6, textAlign: 'right' }}>
                           <button
@@ -1232,24 +1261,46 @@ export function BillingPage({
                   <span>SGST</span><span style={{ fontFamily: theme.mono }}>₹{money(preview.sgst)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: 200, fontSize: 12, color: color.inkFaint }}>
-                  <span>Bill Discount</span>
-                  <span style={{ display: 'flex', gap: 4 }}>
+                  <span>Bill Discount <span style={{ fontSize: 10, color: color.inkFaint }}>({activeBillDiscountLabel})</span></span>
+                  <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <span style={{ fontSize: 11 }}>Percent</span>
                     <input
                       key={`disc-pct-${cartGen}`}
                       defaultValue={billDiscountPct || ''}
                       type="number"
                       className="rt-input"
                       placeholder="%"
-                      onBlur={(e) => setBillDiscountPct(Number(e.currentTarget.value) || 0)}
+                      onBlur={(e) => {
+                        const value = clampDiscount(Number(e.currentTarget.value) || 0);
+                        setBillDiscountPct(value);
+                        if (value > 0) {
+                          setBillDiscountAmt(0);
+                          setBillDiscountMode('pct');
+                        } else {
+                          setBillDiscountMode('none');
+                        }
+                        setCartGen((g) => g + 1);
+                      }}
                       style={cellInputStyle(38, 'right')}
                     />
+                    <span style={{ fontSize: 11 }}>Rupees</span>
                     <input
                       key={`disc-amt-${cartGen}`}
                       defaultValue={billDiscountAmt || ''}
                       type="number"
                       className="rt-input"
                       placeholder="₹"
-                      onBlur={(e) => setBillDiscountAmt(Number(e.currentTarget.value) || 0)}
+                      onBlur={(e) => {
+                        const value = Math.max(0, Number(e.currentTarget.value) || 0);
+                        setBillDiscountAmt(value);
+                        if (value > 0) {
+                          setBillDiscountPct(0);
+                          setBillDiscountMode('amount');
+                        } else {
+                          setBillDiscountMode('none');
+                        }
+                        setCartGen((g) => g + 1);
+                      }}
                       style={cellInputStyle(48, 'right')}
                     />
                   </span>

@@ -117,6 +117,7 @@ model Item {
   purchaseRate  Decimal  @default(0)
   mrp           Decimal  @default(0)
   sellingRate   Decimal  @default(0)
+  defaultDiscountPct Decimal @default(0)
   gstRate       Decimal  @default(0)
   gstInclusive  Boolean  @default(true) // cloth default: inclusive
   stockQty      Decimal  @default(0) // decimal(10,3)

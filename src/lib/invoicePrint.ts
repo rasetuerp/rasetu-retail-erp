@@ -243,6 +243,17 @@ function lineChargedAmount(line: { amount: string; gstRate: string }): number {
   return Number(line.amount) * (1 + Number(line.gstRate) / 100);
 }
 
+function lineSaleUnitPrice(line: { qty: string; amount: string; gstRate: string }): number {
+  const qty = Number(line.qty) || 1;
+  return lineChargedAmount(line) / qty;
+}
+
+function lineDiscountLabel(line: { rate: string; discountPct: string }): string {
+  const discountPct = Number(line.discountPct);
+  if (!(discountPct > 0)) return '';
+  return `MRP ${money(line.rate)}  Disc ${discountPct.toFixed(2)}%`;
+}
+
 // ---------- Thermal (ESC/POS raw text — electron/printer-api.ts sends this
 // verbatim via printRawCommands, see docs/ARCHITECTURE.md) ----------
 
@@ -265,7 +276,9 @@ function thermalStandard(inv: PrintableInvoice, settings: ReceiptSettings): stri
   ];
   for (const line of inv.items) {
     lines.push(`${line.item.sku}`);
-    lines.push(`  ${Number(line.qty)} x ${money(line.rate)} = ${money(lineChargedAmount(line))}`);
+    const discount = lineDiscountLabel(line);
+    if (discount) lines.push(`  ${discount}`);
+    lines.push(`  ${Number(line.qty)} x ${money(lineSaleUnitPrice(line))} = ${money(lineChargedAmount(line))}`);
   }
   lines.push(divider(settings.columns));
   lines.push(`Subtotal: ${money(inv.subtotal)}`);
@@ -287,7 +300,9 @@ function thermalDetailed(inv: PrintableInvoice, settings: ReceiptSettings): stri
   ].filter(Boolean);
   for (const line of inv.items) {
     lines.push(`${line.item.sku}  HSN:${line.item.hsn ?? '-'}  GST:${line.gstRate}%`);
-    lines.push(`  Qty ${Number(line.qty)} @ ${money(line.rate)} = ${money(lineChargedAmount(line))}`);
+    const discount = lineDiscountLabel(line);
+    if (discount) lines.push(`  ${discount}`);
+    lines.push(`  Qty ${Number(line.qty)} @ ${money(lineSaleUnitPrice(line))} = ${money(lineChargedAmount(line))}`);
   }
   lines.push(divider(settings.columns, '='));
   lines.push(`Taxable: ${money(inv.subtotal)}`);
@@ -371,7 +386,9 @@ function sectionItems(inv: PrintableInvoice): string[] {
   for (const line of inv.items) {
     lines.push(displayName(line.item));
     lines.push(`HSN ${line.item.hsn ?? '-'} GST ${line.gstRate}%`);
-    lines.push(`  Qty ${Number(line.qty)} x ${money(line.rate)} = ${money(lineChargedAmount(line))}`);
+    const discount = lineDiscountLabel(line);
+    if (discount) lines.push(`  ${discount}`);
+    lines.push(`  Qty ${Number(line.qty)} x ${money(lineSaleUnitPrice(line))} = ${money(lineChargedAmount(line))}`);
   }
   return lines;
 }
@@ -792,7 +809,7 @@ export function buildA4Html(inv: PrintableInvoice, layout: A4Layout, settings?: 
         <td>${escapeHtml(displayName(line.item))}<div class="sku">${escapeHtml(line.item.sku)}</div></td>
         <td>${escapeHtml(line.item.hsn ?? '-')}</td>
         <td style="text-align:right">${Number(line.qty)}</td>
-        <td style="text-align:right">${money(line.rate)}</td>
+        <td style="text-align:right">${money(lineSaleUnitPrice(line))}${Number(line.discountPct) > 0 ? `<div class="sku">MRP ${money(line.rate)} - ${Number(line.discountPct).toFixed(2)}% off</div>` : ''}</td>
         <td style="text-align:right">${line.gstRate}%</td>
         <td style="text-align:right">${money(lineChargedAmount(line))}</td>
       </tr>`

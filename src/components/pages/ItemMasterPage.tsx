@@ -18,6 +18,7 @@ type Item = {
   purchaseRate: string;
   mrp: string;
   sellingRate: string;
+  defaultDiscountPct: string;
   stockQty: string;
   minStock: string;
   hsn: string | null;
@@ -65,6 +66,15 @@ const FALLBACK_PROFILE: VerticalProfile = {
 // carries its own mrpSlabRule and this keeps working unchanged.
 function suggestGstRateForMrp(mrp: number, slab: { thresholdMrp: number; rateBelowOrEqual: number; rateAbove: number }): number {
   return mrp <= slab.thresholdMrp ? slab.rateBelowOrEqual : slab.rateAbove;
+}
+
+function clampDiscount(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
+function salePriceFromMrp(mrp: number, discountPct: number) {
+  return mrp * (1 - clampDiscount(discountPct) / 100);
 }
 
 // Round 22 — a deterministic color per category name (no new data, no
@@ -124,6 +134,7 @@ export function ItemMasterPage() {
   const purchaseRateRef = useRef<HTMLInputElement>(null);
   const mrpRef = useRef<HTMLInputElement>(null);
   const sellingRateRef = useRef<HTMLInputElement>(null);
+  const defaultDiscountRef = useRef<HTMLInputElement>(null);
   const openingStockRef = useRef<HTMLInputElement>(null);
   const minStockRef = useRef<HTMLInputElement>(null);
   const hsnRef = useRef<HTMLInputElement>(null);
@@ -157,6 +168,9 @@ export function ItemMasterPage() {
   const editBrandRef = useRef<HTMLInputElement>(null);
   const editUnitRef = useRef<HTMLSelectElement>(null);
   const editPurchaseRateRef = useRef<HTMLInputElement>(null);
+  const editMrpRef = useRef<HTMLInputElement>(null);
+  const editDefaultDiscountRef = useRef<HTMLInputElement>(null);
+  const editSellingRateRef = useRef<HTMLInputElement>(null);
   const editBarcodeRef = useRef<HTMLInputElement>(null);
   const editHsnRef = useRef<HTMLInputElement>(null);
   const editGstRateRef = useRef<HTMLSelectElement>(null);
@@ -251,6 +265,7 @@ export function ItemMasterPage() {
           attrValues[attr.key] = value || undefined;
         }
       }
+      const mrp = Number(mrpRef.current?.value ?? 0);
       await apiRequest(`/companies/${session.companyId}/items`, {
         method: 'POST',
         token: session.token,
@@ -260,8 +275,9 @@ export function ItemMasterPage() {
           customFields: Object.keys(customFieldValues).length > 0 ? customFieldValues : undefined,
           unit: unitRef.current?.value || profile.units.default,
           purchaseRate: Number(purchaseRateRef.current?.value ?? 0),
-          mrp: Number(mrpRef.current?.value ?? 0),
-          sellingRate: Number(sellingRateRef.current?.value ?? 0),
+          mrp,
+          sellingRate: Number(sellingRateRef.current?.value || mrp),
+          defaultDiscountPct: clampDiscount(Number(defaultDiscountRef.current?.value ?? 0)),
           openingStock: Number(openingStockRef.current?.value ?? 0),
           minStock: Number(minStockRef.current?.value ?? 0),
           hsn: hsnRef.current?.value || undefined,
@@ -280,6 +296,7 @@ export function ItemMasterPage() {
       if (purchaseRateRef.current) purchaseRateRef.current.value = '';
       if (mrpRef.current) mrpRef.current.value = '';
       if (sellingRateRef.current) sellingRateRef.current.value = '';
+      if (defaultDiscountRef.current) defaultDiscountRef.current.value = '';
       if (openingStockRef.current) openingStockRef.current.value = '';
       if (minStockRef.current) minStockRef.current.value = '';
       if (hsnRef.current) hsnRef.current.value = '';
@@ -304,15 +321,28 @@ export function ItemMasterPage() {
   }
 
   function handleMrpChange(e: React.ChangeEvent<HTMLInputElement>) {
-    if (gstManuallySet || !profile) return;
     const mrp = Number(e.currentTarget.value) || 0;
-    setGstRateValue(String(suggestGstRateForMrp(mrp, profile.gst.mrpSlabRule)));
+    if (!gstManuallySet && profile) setGstRateValue(String(suggestGstRateForMrp(mrp, profile.gst.mrpSlabRule)));
+    syncSellingRate();
+  }
+
+  function syncSellingRate() {
+    const mrp = Number(mrpRef.current?.value || 0);
+    const discountPct = clampDiscount(Number(defaultDiscountRef.current?.value || 0));
+    if (sellingRateRef.current) sellingRateRef.current.value = salePriceFromMrp(mrp, discountPct).toFixed(2);
+  }
+
+  function syncEditSellingRate() {
+    const mrp = Number(editMrpRef.current?.value || 0);
+    const discountPct = clampDiscount(Number(editDefaultDiscountRef.current?.value || 0));
+    if (editSellingRateRef.current) editSellingRateRef.current.value = salePriceFromMrp(mrp, discountPct).toFixed(2);
   }
 
   async function handleSaveEdit(itemId: string) {
     if (!session) return;
     setEditError(null);
     try {
+      const mrp = Number(editMrpRef.current?.value ?? 0);
       await apiRequest(`/companies/${session.companyId}/items/${itemId}`, {
         method: 'PATCH',
         token: session.token,
@@ -320,6 +350,9 @@ export function ItemMasterPage() {
           brand: editBrandRef.current?.value || undefined,
           unit: editUnitRef.current?.value || undefined,
           purchaseRate: Number(editPurchaseRateRef.current?.value ?? 0),
+          mrp,
+          defaultDiscountPct: clampDiscount(Number(editDefaultDiscountRef.current?.value ?? 0)),
+          sellingRate: Number(editSellingRateRef.current?.value || mrp),
           barcode: editBarcodeRef.current?.value || undefined,
           hsn: editHsnRef.current?.value || undefined,
           gstRate: Number(editGstRateRef.current?.value ?? 0),
@@ -468,6 +501,7 @@ export function ItemMasterPage() {
           <FormSection title="Pricing">
             <QuickField label="Purchase Rate" innerRef={purchaseRateRef} style={numberInputStyle} type="number" />
             <QuickField label="MRP" innerRef={mrpRef} style={numberInputStyle} type="number" onChange={handleMrpChange} />
+            <QuickField label="Default Disc %" innerRef={defaultDiscountRef} style={numberInputStyle} type="number" onChange={syncSellingRate} />
             <QuickField label="Selling Rate" innerRef={sellingRateRef} style={numberInputStyle} type="number" />
             <label style={labelStyle}>
               HSN (optional)
@@ -541,6 +575,8 @@ export function ItemMasterPage() {
             <th style={{ padding: 10 }}>Size</th>
             <th style={{ padding: 10 }}>Color</th>
             <th style={{ padding: 10 }}>MRP</th>
+            <th style={{ padding: 10 }}>Disc%</th>
+            <th style={{ padding: 10 }}>Selling</th>
             <th style={{ padding: 10 }}>HSN</th>
             <th style={{ padding: 10 }}>GST%</th>
             <th style={{ padding: 10 }}>Stock</th>
@@ -550,9 +586,9 @@ export function ItemMasterPage() {
         </thead>
         <tbody>
           {loading ? (
-            <tr><td colSpan={11} style={{ padding: 18, textAlign: 'center', color: color.inkFaint, fontSize: 13 }}>Loading…</td></tr>
+            <tr><td colSpan={13} style={{ padding: 18, textAlign: 'center', color: color.inkFaint, fontSize: 13 }}>Loading…</td></tr>
           ) : items.length === 0 ? (
-            <tr><td colSpan={11} style={{ padding: 18, textAlign: 'center', color: color.inkFaint, fontSize: 13 }}>No items yet - add one above.</td></tr>
+            <tr><td colSpan={13} style={{ padding: 18, textAlign: 'center', color: color.inkFaint, fontSize: 13 }}>No items yet - add one above.</td></tr>
           ) : (
             items.map((item) => (
               <Fragment key={item.id}>
@@ -570,6 +606,8 @@ export function ItemMasterPage() {
                   <td style={{ padding: 10, color: color.inkSoft }}>{item.size}</td>
                   <td style={{ padding: 10, color: color.inkSoft }}>{item.color}</td>
                   <td style={{ padding: 10, fontFamily: theme.mono }}>₹{Number(item.mrp).toLocaleString('en-IN')}</td>
+                  <td style={{ padding: 10, fontFamily: theme.mono }}>{Number(item.defaultDiscountPct || 0).toFixed(2)}%</td>
+                  <td style={{ padding: 10, fontFamily: theme.mono }}>₹{Number(item.sellingRate).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   <td style={{ padding: 10, color: color.inkSoft }}>{item.hsn ?? '-'}</td>
                   <td style={{ padding: 10, fontFamily: theme.mono }}>{Number(item.gstRate)}%</td>
                   <td style={{ padding: 10, fontFamily: theme.mono }}>{Number(item.stockQty)} {item.unit}</td>
@@ -615,7 +653,7 @@ export function ItemMasterPage() {
                 </tr>
                 {editingItemId === item.id && (
                   <tr style={{ background: color.paper }}>
-                    <td colSpan={11} style={{ padding: 12 }}>
+                    <td colSpan={13} style={{ padding: 12 }}>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                         <label style={labelStyle}>
                           Brand
@@ -632,6 +670,18 @@ export function ItemMasterPage() {
                         <label style={labelStyle}>
                           Purchase Rate
                           <input ref={editPurchaseRateRef} defaultValue={item.purchaseRate} type="number" style={numberInputStyle} />
+                        </label>
+                        <label style={labelStyle}>
+                          MRP
+                          <input ref={editMrpRef} defaultValue={item.mrp} type="number" onChange={syncEditSellingRate} style={numberInputStyle} />
+                        </label>
+                        <label style={labelStyle}>
+                          Default Disc %
+                          <input ref={editDefaultDiscountRef} defaultValue={item.defaultDiscountPct ?? '0'} type="number" onChange={syncEditSellingRate} style={numberInputStyle} />
+                        </label>
+                        <label style={labelStyle}>
+                          Selling Rate
+                          <input ref={editSellingRateRef} defaultValue={item.sellingRate} type="number" style={numberInputStyle} />
                         </label>
                         <label style={labelStyle}>
                           Barcode
@@ -659,7 +709,7 @@ export function ItemMasterPage() {
                 )}
                 {adjustingItemId === item.id && (
                   <tr style={{ background: color.paper }}>
-                    <td colSpan={11} style={{ padding: 12 }}>
+                    <td colSpan={13} style={{ padding: 12 }}>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                         <label style={labelStyle}>
                           Qty (+ in / - out)

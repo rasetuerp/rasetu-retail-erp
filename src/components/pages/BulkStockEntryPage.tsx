@@ -50,6 +50,7 @@ export function BulkStockEntryPage() {
   const purchaseRateRef = useRef<HTMLInputElement>(null);
   const mrpRef = useRef<HTMLInputElement>(null);
   const sellingRateRef = useRef<HTMLInputElement>(null);
+  const defaultDiscountRef = useRef<HTMLInputElement>(null);
   const hsnRef = useRef<HTMLInputElement>(null);
   const minStockRef = useRef<HTMLInputElement>(null);
   // Round 13 — Auto requires a matched Category (drives /next-sku); Manual
@@ -157,9 +158,20 @@ export function BulkStockEntryPage() {
   // Mirrors ItemMasterPage.tsx's handleMrpChange — GST% dropdown default
   // tracks MRP until the user picks a value themselves.
   function handleMrpChange(e: React.ChangeEvent<HTMLInputElement>) {
-    if (gstManuallySet) return;
     const mrp = Number(e.currentTarget.value) || 0;
-    setGstRateValue(String(mrp <= slabRule.thresholdMrp ? slabRule.rateBelowOrEqual : slabRule.rateAbove));
+    if (!gstManuallySet) setGstRateValue(String(mrp <= slabRule.thresholdMrp ? slabRule.rateBelowOrEqual : slabRule.rateAbove));
+    syncSellingRate();
+  }
+
+  function clampDiscount(value: number) {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(100, value));
+  }
+
+  function syncSellingRate() {
+    const mrp = Number(mrpRef.current?.value || 0);
+    const discountPct = clampDiscount(Number(defaultDiscountRef.current?.value || 0));
+    if (sellingRateRef.current) sellingRateRef.current.value = (mrp * (1 - discountPct / 100)).toFixed(2);
   }
 
   function updateRow(tempId: number, patch: Partial<BulkRow>) {
@@ -189,6 +201,7 @@ export function BulkStockEntryPage() {
         purchaseRate: Number(purchaseRateRef.current?.value || 0),
         mrp,
         sellingRate: Number(sellingRateRef.current?.value || mrp),
+        defaultDiscountPct: clampDiscount(Number(defaultDiscountRef.current?.value || 0)),
         hsn: hsnRef.current?.value.trim() || undefined,
         gstRate: Number(gstRateValue),
         gstInclusive,
@@ -293,7 +306,8 @@ export function BulkStockEntryPage() {
           </label>
           <label style={labelStyle}>Purchase rate<input ref={purchaseRateRef} defaultValue="" type="number" style={inputStyle} /></label>
           <label style={labelStyle}>MRP<input ref={mrpRef} defaultValue="" type="number" style={inputStyle} onChange={handleMrpChange} /></label>
-          <label style={labelStyle}>Selling rate<input ref={sellingRateRef} defaultValue="" type="number" placeholder="defaults to MRP" style={inputStyle} /></label>
+          <label style={labelStyle}>Default disc %<input ref={defaultDiscountRef} defaultValue="" type="number" placeholder="0" style={inputStyle} onChange={syncSellingRate} /></label>
+          <label style={labelStyle}>Selling rate<input ref={sellingRateRef} defaultValue="" type="number" placeholder="auto from MRP" style={inputStyle} /></label>
           <label style={labelStyle}>HSN (optional)<input ref={hsnRef} defaultValue="" placeholder="e.g. 6109" style={inputStyle} /></label>
           <label style={labelStyle}>
             GST %
