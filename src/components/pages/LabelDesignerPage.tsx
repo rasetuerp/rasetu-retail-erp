@@ -477,10 +477,19 @@ export function LabelDesignerPage() {
                     </label>
                   )}
                   {selectedElement.showLabel && (
-                    <label style={{ ...labelStyle, marginTop: 8 }}>
-                      Label prefix text
-                      <input value={selectedElement.displayLabel ?? ''} onChange={(e) => updateElement(selectedElement.id, { displayLabel: e.target.value })} style={inputStyle} />
-                    </label>
+                    <>
+                      <label style={{ ...labelStyle, marginTop: 8 }}>
+                        Label prefix text
+                        <input value={selectedElement.displayLabel ?? ''} onChange={(e) => updateElement(selectedElement.id, { displayLabel: e.target.value })} style={inputStyle} />
+                      </label>
+                      <label style={{ ...labelStyle, marginTop: 8 }}>
+                        Prefix layout
+                        <select value={selectedElement.labelPlacement ?? 'inline'} onChange={(e) => updateElement(selectedElement.id, { labelPlacement: e.target.value as DesignElement['labelPlacement'] })} style={inputStyle}>
+                          <option value="inline">Inline - label and value align together</option>
+                          <option value="split">Split - label left, value uses Align</option>
+                        </select>
+                      </label>
+                    </>
                   )}
                 </>
               )}

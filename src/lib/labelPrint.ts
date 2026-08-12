@@ -25,6 +25,7 @@ export type DesignElement = {
   content?: string;
   showLabel?: boolean;
   displayLabel?: string;
+  labelPlacement?: 'inline' | 'split';
   barcodeType?: 'code128' | 'code39' | 'ean13' | 'upca';
 };
 
@@ -400,6 +401,8 @@ export async function buildPrinterTemplate(draft: LabelTemplateDto) {
         fontSize: el.fontSize,
         fontWeight: el.bold ? ('bold' as const) : ('normal' as const),
         align: el.align,
+        labelPrefix: el.type === 'text' && el.showLabel && el.displayLabel ? el.displayLabel : undefined,
+        labelPlacement: el.labelPlacement,
         barcodeType: el.barcodeType,
         qrSize: el.type === 'qrcode' ? Math.max(1, Math.round(el.widthMm / 4)) : undefined,
       };
@@ -434,7 +437,7 @@ export function buildDataForItem(draft: LabelTemplateDto, item: LabelPrintItem, 
   for (const el of draft.elements) {
     if (!el.sourceKey) continue;
     const value = resolveFieldValue(el.sourceKey, item, company);
-    data[el.sourceKey] = el.type === 'text' && el.showLabel && el.displayLabel ? `${el.displayLabel}: ${value}` : value;
+    data[el.sourceKey] = value;
   }
   return data;
 }

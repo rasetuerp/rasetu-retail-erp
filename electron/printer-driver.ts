@@ -34,6 +34,8 @@ export interface LabelElement {
   fontFamily?: string;
   fontWeight?: 'normal' | 'bold';
   align?: 'left' | 'center' | 'right';
+  labelPrefix?: string;
+  labelPlacement?: 'inline' | 'split';
   barcodeType?: 'code128' | 'code39' | 'ean13' | 'upca';
   qrSize?: number;
   // Round 21 — 'image' elements arrive pre-dithered from the renderer (see
@@ -293,12 +295,18 @@ export class TscPrinterDriver {
       const y = mmToDots(transformed.y + effectiveMarginTop, this.profile.dpi);
 
       if (element.type === 'text') {
-        const content = tsplQuote(resolveContent(element, data));
-        if (!content) continue;
+        const rawContent = resolveContent(element, data);
+        const labelPrefix = element.labelPrefix?.trim();
+        const textValue = labelPrefix && element.labelPlacement !== 'split' ? `${labelPrefix}: ${rawContent}` : rawContent;
+        const content = tsplQuote(textValue);
+        if (!content && !labelPrefix) continue;
 
         const font = fontForSize(element.fontSize);
         const boxWidthDots = mmToDots(element.width || 0, this.profile.dpi);
-        const rawTextWidth = textWidthDots(resolveContent(element, data), font);
+        if (labelPrefix && element.labelPlacement === 'split') {
+          lines.push(`TEXT ${x},${y},"${font}",${transformed.rotation},1,1,"${tsplQuote(`${labelPrefix}:`)}"`);
+        }
+        const rawTextWidth = textWidthDots(textValue, font);
         const alignedX =
           element.align === 'right'
             ? x + Math.max(0, boxWidthDots - rawTextWidth)

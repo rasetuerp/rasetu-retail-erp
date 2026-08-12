@@ -34,8 +34,17 @@ export function LabelElementPreview({
 }) {
   if (el.type === 'text') {
     const value = el.sourceKey ? resolveFieldValue(el.sourceKey, item, company) : (el.content ?? '');
-    const label = el.sourceKey && el.showLabel && el.displayLabel ? `${el.displayLabel}: ` : '';
-    return <>{label}{value}</>;
+    const label = el.sourceKey && el.showLabel && el.displayLabel ? el.displayLabel : '';
+    if (label && el.labelPlacement === 'split') {
+      return (
+        <span style={{ display: 'flex', width: '100%', height: '100%', alignItems: 'center', gap: 4 }}>
+          <span style={{ flexShrink: 0 }}>{label}:</span>
+          <span style={{ flex: 1, textAlign: el.align ?? 'right', minWidth: 0 }}>{value}</span>
+        </span>
+      );
+    }
+    const inlineLabel = label ? `${label}: ` : '';
+    return <>{inlineLabel}{value}</>;
   }
   if (el.type === 'barcode' || el.type === 'qrcode') {
     const value = el.sourceKey ? resolveFieldValue(el.sourceKey, item, company) : (el.content ?? '');
