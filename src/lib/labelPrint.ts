@@ -27,6 +27,7 @@ export type DesignElement = {
   displayLabel?: string;
   labelPlacement?: 'inline' | 'split';
   barcodeType?: 'code128' | 'code39' | 'ean13' | 'upca';
+  bitmap?: { widthDots: number; heightDots: number; bytesPerRow: number; hex: string };
 };
 
 // Round 21 — xOffsetMm/yOffsetMm/darkness existed here since the templates
@@ -406,6 +407,7 @@ export async function buildPrinterTemplate(draft: LabelTemplateDto) {
         barcodeType: el.barcodeType,
         qrSize: el.type === 'qrcode' ? Math.max(1, Math.round(el.widthMm / 4)) : undefined,
       };
+      if (el.type === 'image' && el.bitmap) return { ...base, bitmap: el.bitmap };
       if (el.type !== 'image' || !el.content) return base;
       const { imageToThermalBitmap } = await import('./thermalBitmap');
       try {
@@ -440,4 +442,78 @@ export function buildDataForItem(draft: LabelTemplateDto, item: LabelPrintItem, 
     data[el.sourceKey] = value;
   }
   return data;
+}
+
+export async function buildPrinterPayloadForItem(draft: LabelTemplateDto, item: LabelPrintItem, company: LabelPrintCompany | null) {
+  const template = await buildPrinterTemplate({
+    ...draft,
+    elements: await expandRupeeTextElements(draft, item, company),
+  });
+  return { template, data: buildDataForItem(draft, item, company) };
+}
+
+async function expandRupeeTextElements(draft: LabelTemplateDto, item: LabelPrintItem, company: LabelPrintCompany | null): Promise<DesignElement[]> {
+  const { textToThermalBitmap } = await import('./thermalBitmap');
+  const expanded: DesignElement[] = [];
+  for (const el of draft.elements) {
+    if (el.type !== 'text') {
+      expanded.push(el);
+      continue;
+    }
+    const value = el.sourceKey ? resolveFieldValue(el.sourceKey, item, company) : (el.content ?? '');
+    const labelPrefix = el.sourceKey && el.showLabel && el.displayLabel ? el.displayLabel : '';
+    const inlineText = labelPrefix && el.labelPlacement !== 'split' ? `${labelPrefix}: ${value}` : value;
+    if (!inlineText.includes('₹')) {
+      expanded.push(el);
+      continue;
+    }
+
+    if (labelPrefix && el.labelPlacement === 'split') {
+      const labelWidthMm = Math.min(el.widthMm * 0.6, textWidthMm(`${labelPrefix}: `, el.fontSize, draft.printConfig.dpi));
+      const valueX = el.xMm + labelWidthMm;
+      const valueWidth = Math.max(1, el.widthMm - labelWidthMm);
+      expanded.push({
+        ...el,
+        id: `${el.id}-prefix`,
+        sourceKey: undefined,
+        content: `${labelPrefix}:`,
+        showLabel: false,
+        displayLabel: undefined,
+        labelPlacement: undefined,
+        align: 'left',
+        widthMm: labelWidthMm,
+      });
+      expanded.push({
+        ...el,
+        id: `${el.id}-value-bitmap`,
+        type: 'image',
+        sourceKey: undefined,
+        content: '',
+        showLabel: false,
+        displayLabel: undefined,
+        labelPlacement: undefined,
+        xMm: valueX,
+        widthMm: valueWidth,
+        bitmap: textToThermalBitmap(value, valueWidth, el.heightMm, { dpi: draft.printConfig.dpi, fontSize: el.fontSize, bold: el.bold, align: el.align ?? 'right' }) as never,
+      } as DesignElement);
+      continue;
+    }
+
+    expanded.push({
+      ...el,
+      type: 'image',
+      sourceKey: undefined,
+      content: '',
+      showLabel: false,
+      displayLabel: undefined,
+      labelPlacement: undefined,
+      bitmap: textToThermalBitmap(inlineText, el.widthMm, el.heightMm, { dpi: draft.printConfig.dpi, fontSize: el.fontSize, bold: el.bold, align: el.align }) as never,
+    } as DesignElement);
+  }
+  return expanded;
+}
+
+function textWidthMm(value: string, sizePt = 10, dpi: 203 | 300 = 203): number {
+  const perCharDots = sizePt <= 8 ? 8 : sizePt <= 10 ? 12 : sizePt <= 14 ? 16 : 24;
+  return (value.length * perCharDots / dpi) * 25.4;
 }

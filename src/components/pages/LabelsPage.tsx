@@ -3,7 +3,7 @@ import { apiRequest, ApiError } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { theme } from '../../lib/theme';
 import { LabelElementPreview } from '../LabelElementPreview';
-import { buildPrinterTemplate, buildDataForItem, tsplFontPreviewPx, type LabelTemplateDto, type LabelPrintItem as Item, type LabelPrintCompany } from '../../lib/labelPrint';
+import { buildPrinterPayloadForItem, tsplFontPreviewPx, type LabelTemplateDto, type LabelPrintItem as Item, type LabelPrintCompany } from '../../lib/labelPrint';
 
 // RULES.md #2: types declared inline (shared shapes in src/lib/labelPrint.ts).
 // Round 7 — this page is now the day-to-day "print labels for these items"
@@ -60,8 +60,7 @@ export function LabelsPage() {
     }
     try {
       const result = await window.rasetu.printer.printLabel('default', {
-        template: await buildPrinterTemplate(template),
-        data: buildDataForItem(template, item, company),
+        ...(await buildPrinterPayloadForItem(template, item, company)),
         copies,
       });
       setStatus(result.message);

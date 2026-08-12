@@ -7,7 +7,7 @@ import { LabelElementPreview } from '../LabelElementPreview';
 import { readLabelImageFile } from '../../lib/thermalBitmap';
 import {
   buildPrinterTemplate,
-  buildDataForItem,
+  buildPrinterPayloadForItem,
   buildFieldOptions,
   defaultElementsForSize,
   PRESET_GALLERY,
@@ -279,8 +279,7 @@ export function LabelDesignerPage() {
     }
     setPrinting(true);
     try {
-      const printerTemplate = await buildPrinterTemplate(draft);
-      const labels = selected.map((item) => ({ template: printerTemplate, data: buildDataForItem(draft, item, company), copies }));
+      const labels = await Promise.all(selected.map(async (item) => ({ ...(await buildPrinterPayloadForItem(draft, item, company)), copies })));
       const result = await window.rasetu.printer.printBatch('default', labels);
       setStatus(result.message ?? (result.success ? 'Printed.' : 'Print failed.'));
     } finally {

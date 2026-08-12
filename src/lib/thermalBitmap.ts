@@ -9,6 +9,35 @@ const DOTS_PER_MM: Record<203 | 300, number> = { 203: 8, 300: 11.8 };
 
 export type ThermalBitmap = { widthDots: number; heightDots: number; bytesPerRow: number; hex: string };
 
+export function textToThermalBitmap(
+  text: string,
+  widthMm: number,
+  heightMm: number,
+  options: { dpi?: 203 | 300; fontSize?: number; bold?: boolean; align?: 'left' | 'center' | 'right' } = {}
+): ThermalBitmap {
+  const dpi = options.dpi ?? 203;
+  const dotsPerMm = DOTS_PER_MM[dpi];
+  const widthDots = Math.max(8, Math.round(widthMm * dotsPerMm));
+  const heightDots = Math.max(8, Math.round(heightMm * dotsPerMm));
+  const canvas = document.createElement('canvas');
+  canvas.width = widthDots;
+  canvas.height = heightDots;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('Could not prepare text for thermal printing.');
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, widthDots, heightDots);
+  ctx.fillStyle = '#000';
+  const fontPx = Math.max(8, Math.round((options.fontSize ?? 10) * (dpi / 72) * 1.08));
+  ctx.font = `${options.bold ? '700 ' : ''}${fontPx}px Arial, Noto Sans, Segoe UI, sans-serif`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = options.align ?? 'left';
+  const x = options.align === 'right' ? widthDots - 1 : options.align === 'center' ? widthDots / 2 : 0;
+  ctx.fillText(text, x, heightDots / 2, widthDots);
+
+  return pixelsToThermalBitmap(ctx.getImageData(0, 0, widthDots, heightDots).data, widthDots, heightDots, 180);
+}
+
 export function imageToThermalBitmap(dataUrl: string, widthMm: number, heightMm: number, dpi: 203 | 300 = 203): Promise<ThermalBitmap> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -31,8 +60,6 @@ export function imageToThermalBitmap(dataUrl: string, widthMm: number, heightMm:
       ctx.fillRect(0, 0, widthDots, heightDots);
       ctx.drawImage(img, 0, 0, widthDots, heightDots);
       const pixels = ctx.getImageData(0, 0, widthDots, heightDots).data;
-      const bytesPerRow = Math.ceil(widthDots / 8);
-      const bytes: number[] = [];
       const background = estimateCornerBackground(pixels, widthDots, heightDots);
       const stripBackground = background ? colorDistance(background, [255, 255, 255]) > 70 : false;
       const gray = new Float32Array(widthDots * heightDots);
@@ -51,42 +78,58 @@ export function imageToThermalBitmap(dataUrl: string, widthMm: number, heightMm:
         }
       }
 
-      for (let y = 0; y < heightDots; y++) {
-        for (let x = 0; x < widthDots; x++) {
-          const idx = y * widthDots + x;
-          const old = gray[idx];
-          const next = old < 168 ? 0 : 255;
-          const error = old - next;
-          gray[idx] = next;
-          distributeDitherError(gray, widthDots, heightDots, x + 1, y, error * 7 / 16);
-          distributeDitherError(gray, widthDots, heightDots, x - 1, y + 1, error * 3 / 16);
-          distributeDitherError(gray, widthDots, heightDots, x, y + 1, error * 5 / 16);
-          distributeDitherError(gray, widthDots, heightDots, x + 1, y + 1, error * 1 / 16);
-        }
-      }
-
-      for (let y = 0; y < heightDots; y++) {
-        for (let bx = 0; bx < bytesPerRow; bx++) {
-          let value = 0;
-          for (let bit = 0; bit < 8; bit++) {
-            const x = bx * 8 + bit;
-            if (x >= widthDots) continue;
-            if (gray[y * widthDots + x] === 0) value |= 0x80 >> bit;
-          }
-          bytes.push(value);
-        }
-      }
-
-      resolve({
-        widthDots,
-        heightDots,
-        bytesPerRow,
-        hex: bytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(''),
-      });
+      resolve(grayToThermalBitmap(gray, widthDots, heightDots, 168));
     };
     img.onerror = () => reject(new Error('Could not load image for thermal printing.'));
     img.src = dataUrl;
   });
+}
+
+function pixelsToThermalBitmap(pixels: Uint8ClampedArray, widthDots: number, heightDots: number, threshold: number): ThermalBitmap {
+  const gray = new Float32Array(widthDots * heightDots);
+  for (let y = 0; y < heightDots; y++) {
+    for (let x = 0; x < widthDots; x++) {
+      const idx = (y * widthDots + x) * 4;
+      const alpha = pixels[idx + 3];
+      gray[y * widthDots + x] = alpha < 50 ? 255 : 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
+    }
+  }
+  return grayToThermalBitmap(gray, widthDots, heightDots, threshold);
+}
+
+function grayToThermalBitmap(gray: Float32Array, widthDots: number, heightDots: number, threshold: number): ThermalBitmap {
+  const bytesPerRow = Math.ceil(widthDots / 8);
+  const bytes: number[] = [];
+  for (let y = 0; y < heightDots; y++) {
+    for (let x = 0; x < widthDots; x++) {
+      const idx = y * widthDots + x;
+      const old = gray[idx];
+      const next = old < threshold ? 0 : 255;
+      const error = old - next;
+      gray[idx] = next;
+      distributeDitherError(gray, widthDots, heightDots, x + 1, y, error * 7 / 16);
+      distributeDitherError(gray, widthDots, heightDots, x - 1, y + 1, error * 3 / 16);
+      distributeDitherError(gray, widthDots, heightDots, x, y + 1, error * 5 / 16);
+      distributeDitherError(gray, widthDots, heightDots, x + 1, y + 1, error * 1 / 16);
+    }
+  }
+  for (let y = 0; y < heightDots; y++) {
+    for (let bx = 0; bx < bytesPerRow; bx++) {
+      let value = 0;
+      for (let bit = 0; bit < 8; bit++) {
+        const x = bx * 8 + bit;
+        if (x >= widthDots) continue;
+        if (gray[y * widthDots + x] === 0) value |= 0x80 >> bit;
+      }
+      bytes.push(value);
+    }
+  }
+  return {
+    widthDots,
+    heightDots,
+    bytesPerRow,
+    hex: bytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(''),
+  };
 }
 
 function clampByte(value: number): number {

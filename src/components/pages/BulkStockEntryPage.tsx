@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiRequest, ApiError } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { theme } from '../../lib/theme';
-import { buildPrinterTemplate, buildDataForItem, type LabelTemplateDto, type LabelPrintItem, type LabelPrintCompany } from '../../lib/labelPrint';
+import { buildPrinterPayloadForItem, type LabelTemplateDto, type LabelPrintItem, type LabelPrintCompany } from '../../lib/labelPrint';
 import { CategoryPicker, type CategoryEntry } from '../CategoryPicker';
 import { SkuModeToggle, type SkuMode } from '../SkuModeToggle';
 
@@ -232,12 +232,10 @@ export function BulkStockEntryPage() {
     }
     try {
       const itemsRes = await apiRequest<{ items: LabelPrintItem[] }>(`/companies/${session.companyId}/labels/queue-data?itemIds=${createdItemIds.join(',')}`, { token: session.token });
-      const printerTemplate = await buildPrinterTemplate(template);
-      const labels = itemsRes.items.map((item) => ({
-        template: printerTemplate,
-        data: buildDataForItem(template, item, company),
+      const labels = await Promise.all(itemsRes.items.map(async (item) => ({
+        ...(await buildPrinterPayloadForItem(template, item, company)),
         copies: 1,
-      }));
+      })));
       const result = await window.rasetu.printer.printBatch('default', labels);
       setStatus(result.message);
     } catch (err) {
