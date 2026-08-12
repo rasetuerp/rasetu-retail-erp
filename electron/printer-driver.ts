@@ -303,16 +303,22 @@ export class TscPrinterDriver {
 
         const font = fontForSize(element.fontSize);
         const boxWidthDots = mmToDots(element.width || 0, this.profile.dpi);
+        let valueX = x;
+        let valueBoxWidthDots = boxWidthDots;
         if (labelPrefix && element.labelPlacement === 'split') {
-          lines.push(`TEXT ${x},${y},"${font}",${transformed.rotation},1,1,"${tsplQuote(`${labelPrefix}:`)}"`);
+          const labelText = `${labelPrefix}:`;
+          lines.push(`TEXT ${x},${y},"${font}",${transformed.rotation},1,1,"${tsplQuote(labelText)}"`);
+          const labelWidthDots = textWidthDots(`${labelText} `, font);
+          valueX = x + labelWidthDots;
+          valueBoxWidthDots = Math.max(0, boxWidthDots - labelWidthDots);
         }
         const rawTextWidth = textWidthDots(textValue, font);
         const alignedX =
           element.align === 'right'
-            ? x + Math.max(0, boxWidthDots - rawTextWidth)
+            ? valueX + Math.max(0, valueBoxWidthDots - rawTextWidth)
             : element.align === 'center'
-              ? x + Math.max(0, Math.round((boxWidthDots - rawTextWidth) / 2))
-              : x;
+              ? valueX + Math.max(0, Math.round((valueBoxWidthDots - rawTextWidth) / 2))
+              : valueX;
         lines.push(`TEXT ${alignedX},${y},"${font}",${transformed.rotation},1,1,"${content}"`);
         continue;
       }
