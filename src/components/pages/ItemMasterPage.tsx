@@ -82,6 +82,12 @@ function discountFromSalePrice(mrp: number, sellingRate: number) {
   return clampDiscount(((mrp - sellingRate) / mrp) * 100);
 }
 
+function effectiveDiscountPct(item: Pick<Item, 'mrp' | 'sellingRate' | 'defaultDiscountPct'>) {
+  const storedDiscount = clampDiscount(Number(item.defaultDiscountPct || 0));
+  if (storedDiscount > 0) return storedDiscount;
+  return discountFromSalePrice(Number(item.mrp), Number(item.sellingRate));
+}
+
 // Round 22 — a deterministic color per category name (no new data, no
 // per-category settings) stands in for GoBilling's per-item photo thumbnail,
 // which RaSetu's Item model has no field for yet.
@@ -123,6 +129,7 @@ export function ItemMasterPage() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [stockFilter, setStockFilter] = useState<'all' | 'in' | 'low' | 'out'>('all');
   const [discountFilter, setDiscountFilter] = useState<'all' | 'discounted' | 'no-discount'>('all');
+  const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
   const [bulkUpdatingDiscount, setBulkUpdatingDiscount] = useState(false);
   const adjustQtyRef = useRef<HTMLInputElement>(null);
   const adjustTypeRef = useRef<HTMLSelectElement>(null);
@@ -277,6 +284,8 @@ export function ItemMasterPage() {
         }
       }
       const mrp = Number(mrpRef.current?.value ?? 0);
+      const sellingRate = Number(sellingRateRef.current?.value || mrp);
+      const defaultDiscountPct = effectiveDiscountPct({ mrp: String(mrp), sellingRate: String(sellingRate), defaultDiscountPct: defaultDiscountRef.current?.value || '0' });
       await apiRequest(`/companies/${session.companyId}/items`, {
         method: 'POST',
         token: session.token,
@@ -287,8 +296,8 @@ export function ItemMasterPage() {
           unit: unitRef.current?.value || profile.units.default,
           purchaseRate: Number(purchaseRateRef.current?.value ?? 0),
           mrp,
-          sellingRate: Number(sellingRateRef.current?.value || mrp),
-          defaultDiscountPct: clampDiscount(Number(defaultDiscountRef.current?.value ?? 0)),
+          sellingRate,
+          defaultDiscountPct,
           openingStock: Number(openingStockRef.current?.value ?? 0),
           minStock: Number(minStockRef.current?.value ?? 0),
           hsn: hsnRef.current?.value || undefined,
@@ -366,6 +375,8 @@ export function ItemMasterPage() {
     setEditError(null);
     try {
       const mrp = Number(editMrpRef.current?.value ?? 0);
+      const sellingRate = Number(editSellingRateRef.current?.value || mrp);
+      const defaultDiscountPct = effectiveDiscountPct({ mrp: String(mrp), sellingRate: String(sellingRate), defaultDiscountPct: editDefaultDiscountRef.current?.value || '0' });
       await apiRequest(`/companies/${session.companyId}/items/${itemId}`, {
         method: 'PATCH',
         token: session.token,
@@ -374,8 +385,8 @@ export function ItemMasterPage() {
           unit: editUnitRef.current?.value || undefined,
           purchaseRate: Number(editPurchaseRateRef.current?.value ?? 0),
           mrp,
-          defaultDiscountPct: clampDiscount(Number(editDefaultDiscountRef.current?.value ?? 0)),
-          sellingRate: Number(editSellingRateRef.current?.value || mrp),
+          defaultDiscountPct,
+          sellingRate,
           barcode: editBarcodeRef.current?.value || undefined,
           hsn: editHsnRef.current?.value || undefined,
           gstRate: Number(editGstRateRef.current?.value ?? 0),
@@ -465,7 +476,7 @@ export function ItemMasterPage() {
     const q = stockSearch.trim().toLowerCase();
     const stockQty = Number(item.stockQty);
     const minStock = Number(item.minStock);
-    const discountPct = Number(item.defaultDiscountPct || 0);
+    const discountPct = effectiveDiscountPct(item);
     const matchesSearch =
       !q ||
       item.sku.toLowerCase().includes(q) ||
@@ -692,11 +703,27 @@ export function ItemMasterPage() {
           >
             Clear filters
           </button>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => setBulkUpdateOpen((open) => !open)}
+            style={{ marginLeft: 'auto', padding: '9px 14px', background: bulkUpdateOpen ? color.ledger : 'transparent', color: bulkUpdateOpen ? '#fff' : color.ledger, border: `1px solid ${color.ledger}`, borderRadius: theme.radiusSm, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+          >
+            Bulk Update {bulkUpdateOpen ? '▲' : '▼'}
+          </button>
+          <div style={{ width: '100%', display: bulkUpdateOpen ? 'flex' : 'none', justifyContent: 'flex-end', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap', paddingTop: 10, borderTop: `1px dashed ${color.line}` }}>
             <label style={labelStyle}>
-              Offer discount %
+              Field
+              <select defaultValue="defaultDiscountPct" style={{ ...textInputStyle, width: 170 }}>
+                <option value="defaultDiscountPct">Default discount %</option>
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Value
               <input ref={bulkDiscountRef} defaultValue="" type="number" placeholder="e.g. 20" style={{ ...numberInputStyle, width: 120 }} />
             </label>
+            <div style={{ maxWidth: 260, fontSize: 11.5, color: color.inkFaint, lineHeight: 1.35 }}>
+              Applies only to currently visible filtered stock. Existing posted bills are not changed.
+            </div>
             <button
               type="button"
               onClick={() => void handleApplyDiscountToFiltered()}
@@ -749,7 +776,7 @@ export function ItemMasterPage() {
                   <td style={{ padding: 10, color: color.inkSoft }}>{item.size}</td>
                   <td style={{ padding: 10, color: color.inkSoft }}>{item.color}</td>
                   <td style={{ padding: 10, fontFamily: theme.mono }}>₹{Number(item.mrp).toLocaleString('en-IN')}</td>
-                  <td style={{ padding: 10, fontFamily: theme.mono }}>{Number(item.defaultDiscountPct || 0).toFixed(2)}%</td>
+                  <td style={{ padding: 10, fontFamily: theme.mono }}>{effectiveDiscountPct(item).toFixed(2)}%</td>
                   <td style={{ padding: 10, fontFamily: theme.mono }}>₹{Number(item.sellingRate).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   <td style={{ padding: 10, color: color.inkSoft }}>{item.hsn ?? '-'}</td>
                   <td style={{ padding: 10, fontFamily: theme.mono }}>{Number(item.gstRate)}%</td>

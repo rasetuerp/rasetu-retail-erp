@@ -87,6 +87,12 @@ function discountFromSalePrice(mrp: number, sellingRate: number) {
   return clampDiscount(((mrp - sellingRate) / mrp) * 100);
 }
 
+function effectiveDiscountPct(mrp: number, sellingRate: number, defaultDiscountPct: number) {
+  const storedDiscount = clampDiscount(defaultDiscountPct);
+  if (storedDiscount > 0) return storedDiscount;
+  return discountFromSalePrice(mrp, sellingRate);
+}
+
 function defaultDueDateStr() {
   const d = new Date();
   d.setDate(d.getDate() + 15);
@@ -318,7 +324,7 @@ export function BillingPage({
       }
       setError(null);
       const mrp = Number(item.mrp) || Number(item.sellingRate) || 0;
-      const discountPct = clampDiscount(Number(item.defaultDiscountPct ?? 0));
+      const discountPct = effectiveDiscountPct(mrp, Number(item.sellingRate || 0), Number(item.defaultDiscountPct ?? 0));
       const gstRate = Number(item.gstRate);
       // Round 6 — the cart always stores an ex-tax unit rate from here on
       // ("Rate without tax"), regardless of how the item's own MRP/selling
@@ -356,8 +362,29 @@ export function BillingPage({
     setCart((prev) => prev.map((l) => (l.itemId === itemId ? { ...l, qty } : l)));
   }
 
-  function updateLineRate(itemId: string, rate: number) {
-    setCart((prev) => prev.map((l) => (l.itemId === itemId ? { ...l, rate } : l)));
+  function updateLineMrpPrice(itemId: string, mrp: number) {
+    const safeMrp = Math.max(0, mrp);
+    setCart((prev) => prev.map((l) => (l.itemId === itemId ? { ...l, rate: safeMrp, mrp: safeMrp, gstRate: safeMrp <= slabRule.thresholdMrp ? slabRule.rateBelowOrEqual : slabRule.rateAbove } : l)));
+  }
+
+  function updateLineSalePrice(itemId: string, salePrice: number) {
+    const safeSalePrice = Math.max(0, salePrice);
+    setCart((prev) =>
+      prev.map((l) => {
+        if (l.itemId !== itemId) return l;
+        const mrp = Number(l.rate) || Number(l.mrp) || safeSalePrice;
+        if (safeSalePrice > mrp) {
+          return {
+            ...l,
+            rate: safeSalePrice,
+            mrp: safeSalePrice,
+            gstRate: safeSalePrice <= slabRule.thresholdMrp ? slabRule.rateBelowOrEqual : slabRule.rateAbove,
+            discountPct: 0,
+          };
+        }
+        return { ...l, discountPct: discountFromSalePrice(mrp, safeSalePrice) };
+      })
+    );
   }
 
   // Amount is the tax-inclusive line total (qty × rate × (1-disc%) × (1+gst%))
@@ -381,7 +408,7 @@ export function BillingPage({
   // engine (same math, new input) — the safe alternative to a raw GST%
   // override, for when a shop's declared MRP has genuinely changed.
   function updateLineMrp(itemId: string, mrp: number) {
-    setCart((prev) => prev.map((l) => (l.itemId === itemId ? { ...l, mrp, gstRate: mrp <= slabRule.thresholdMrp ? slabRule.rateBelowOrEqual : slabRule.rateAbove } : l)));
+    updateLineMrpPrice(itemId, mrp);
   }
 
   function setLineGstOverride(itemId: string, gstRateOverride: number | undefined, gstOverrideReason: string | undefined) {
@@ -796,6 +823,8 @@ export function BillingPage({
     setError(null);
     try {
       const mrp = Number(newItemMrpRef.current?.value || 0);
+      const sellingRate = Number(newItemRateRef.current?.value || mrp);
+      const defaultDiscountPct = effectiveDiscountPct(mrp, sellingRate, Number(newItemDiscountRef.current?.value || 0));
       const res = await apiRequest<{ item: Item }>(`/companies/${session.companyId}/items`, {
         method: 'POST',
         token: session.token,
@@ -808,8 +837,8 @@ export function BillingPage({
           unit: newItemUnitRef.current?.value || units.default,
           purchaseRate: Number(newItemPurchaseRateRef.current?.value || 0),
           mrp,
-          sellingRate: Number(newItemRateRef.current?.value || mrp),
-          defaultDiscountPct: clampDiscount(Number(newItemDiscountRef.current?.value || 0)),
+          sellingRate,
+          defaultDiscountPct,
           openingStock: Number(newItemStockRef.current?.value || 0),
           minStock: Number(newItemMinStockRef.current?.value || 0),
           hsn: newItemHsnRef.current?.value.trim() || undefined,
@@ -1188,7 +1217,7 @@ export function BillingPage({
                             key={line.rate}
                             type="number"
                             className="rt-input"
-                            onBlur={(e) => updateLineRate(line.itemId, Number(e.currentTarget.value) || 0)}
+                            onBlur={(e) => updateLineMrpPrice(line.itemId, Number(e.currentTarget.value) || 0)}
                             style={cellInputStyle(72, 'right')}
                           />
                         </td>
@@ -1202,8 +1231,18 @@ export function BillingPage({
                             style={cellInputStyle(56, 'right')}
                           />
                         </td>
-                        <td style={{ padding: 6, textAlign: 'right', fontFamily: theme.mono }}>
+                        <td style={{ padding: 6, textAlign: 'right' }}>
+                          <input
+                            defaultValue={salePrice.toFixed(2)}
+                            key={`${line.rate}-${line.discountPct}`}
+                            type="number"
+                            className="rt-input"
+                            onBlur={(e) => updateLineSalePrice(line.itemId, Number(e.currentTarget.value) || 0)}
+                            style={cellInputStyle(88, 'right')}
+                          />
+                          <span style={{ display: 'none' }}>
                           ₹{money(salePrice)}
+                          </span>
                         </td>
                         <td style={{ padding: 6, textAlign: 'right' }}>
                           <button
@@ -1271,7 +1310,52 @@ export function BillingPage({
                 <div style={{ display: 'flex', justifyContent: 'space-between', width: 200, fontSize: 12, color: color.inkFaint }}>
                   <span>SGST</span><span style={{ fontFamily: theme.mono }}>₹{money(preview.sgst)}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: 420, fontSize: 12, color: color.inkFaint }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: 360, fontSize: 12, color: color.inkFaint }}>
+                  <span>Bill Discount</span>
+                  <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <select
+                      value={billDiscountMode}
+                      onChange={(e) => {
+                        const mode = e.currentTarget.value as typeof billDiscountMode;
+                        setBillDiscountMode(mode);
+                        if (mode !== 'pct') setBillDiscountPct(0);
+                        if (mode !== 'amount') setBillDiscountAmt(0);
+                        setCartGen((g) => g + 1);
+                      }}
+                      style={{ ...cellInputStyle(128, 'left'), fontFamily: 'inherit' }}
+                    >
+                      <option value="none">No discount</option>
+                      <option value="pct">Percent %</option>
+                      <option value="amount">Rupees</option>
+                    </select>
+                    {billDiscountMode !== 'none' && (
+                      <input
+                        key={`bill-discount-${billDiscountMode}-${cartGen}`}
+                        defaultValue={billDiscountMode === 'pct' ? billDiscountPct || '' : billDiscountAmt || ''}
+                        type="number"
+                        className="rt-input"
+                        placeholder={billDiscountMode === 'pct' ? '%' : 'Rs'}
+                        onBlur={(e) => {
+                          const rawValue = Number(e.currentTarget.value) || 0;
+                          if (billDiscountMode === 'pct') {
+                            const value = clampDiscount(rawValue);
+                            setBillDiscountPct(value);
+                            setBillDiscountAmt(0);
+                            setBillDiscountMode(value > 0 ? 'pct' : 'none');
+                          } else {
+                            const value = Math.max(0, rawValue);
+                            setBillDiscountAmt(value);
+                            setBillDiscountPct(0);
+                            setBillDiscountMode(value > 0 ? 'amount' : 'none');
+                          }
+                          setCartGen((g) => g + 1);
+                        }}
+                        style={cellInputStyle(82, 'right')}
+                      />
+                    )}
+                  </span>
+                </div>
+                <div style={{ display: 'none' }}>
                   <span>Bill Discount <span style={{ fontSize: 10, color: color.inkFaint }}>({activeBillDiscountLabel})</span></span>
                   <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <span style={{ fontSize: 11 }}>Percent</span>

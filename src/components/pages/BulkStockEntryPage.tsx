@@ -195,6 +195,9 @@ export function BulkStockEntryPage() {
     setSaving(true);
     try {
       const mrp = Number(mrpRef.current?.value || 0);
+      const sellingRate = Number(sellingRateRef.current?.value || mrp);
+      const storedDiscount = clampDiscount(Number(defaultDiscountRef.current?.value || 0));
+      const defaultDiscountPct = storedDiscount > 0 ? storedDiscount : (mrp > 0 ? clampDiscount(((mrp - sellingRate) / mrp) * 100) : 0);
       const customFieldValues: Record<string, string> = {};
       for (const attr of customAttrs) {
         const value = customAttrRefs.current[attr.key]?.value.trim();
@@ -207,8 +210,8 @@ export function BulkStockEntryPage() {
         unit: unitRef.current?.value || units.default,
         purchaseRate: Number(purchaseRateRef.current?.value || 0),
         mrp,
-        sellingRate: Number(sellingRateRef.current?.value || mrp),
-        defaultDiscountPct: clampDiscount(Number(defaultDiscountRef.current?.value || 0)),
+        sellingRate,
+        defaultDiscountPct,
         hsn: hsnRef.current?.value.trim() || undefined,
         gstRate: Number(gstRateValue),
         gstInclusive,
