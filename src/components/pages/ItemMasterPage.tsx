@@ -129,12 +129,9 @@ export function ItemMasterPage() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [stockFilter, setStockFilter] = useState<'all' | 'in' | 'low' | 'out'>('all');
   const [discountFilter, setDiscountFilter] = useState<'all' | 'discounted' | 'no-discount'>('all');
-  const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
-  const [bulkUpdatingDiscount, setBulkUpdatingDiscount] = useState(false);
   const adjustQtyRef = useRef<HTMLInputElement>(null);
   const adjustTypeRef = useRef<HTMLSelectElement>(null);
   const adjustReasonRef = useRef<HTMLInputElement>(null);
-  const bulkDiscountRef = useRef<HTMLInputElement>(null);
 
   const skuRef = useRef<HTMLInputElement>(null);
   // Round 13 — Auto keeps the SKU field read-only and filled from /next-sku
@@ -438,40 +435,16 @@ export function ItemMasterPage() {
     }
   }
 
-  async function handleApplyDiscountToFiltered() {
-    if (!session || filteredItems.length === 0) return;
-    const discountPct = clampDiscount(Number(bulkDiscountRef.current?.value ?? 0));
-    const ok = window.confirm(`Apply ${discountPct.toFixed(2)}% discount to ${filteredItems.length} visible item(s)?\n\nThis updates each item's default discount and selling rate. Existing posted bills are not changed.`);
-    if (!ok) return;
-    setBulkUpdatingDiscount(true);
-    setError(null);
-    try {
-      await Promise.all(
-        filteredItems.map((item) =>
-          apiRequest(`/companies/${session.companyId}/items/${item.id}`, {
-            method: 'PATCH',
-            token: session.token,
-            body: {
-              defaultDiscountPct: discountPct,
-              sellingRate: salePriceFromMrp(Number(item.mrp), discountPct),
-            },
-          })
-        )
-      );
-      await loadItems();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to update discounts');
-    } finally {
-      setBulkUpdatingDiscount(false);
-    }
-  }
-
   const totalItems = items.length;
   const availableItems = items.filter((i) => Number(i.stockQty) > 0).length;
   const lowStockCount = items.filter((i) => Number(i.stockQty) <= Number(i.minStock)).length;
   const categoryCount = new Set(items.map((i) => i.category).filter((c): c is string => !!c)).size;
   const totalStockValue = items.reduce((sum, i) => sum + Number(i.stockQty) * Number(i.purchaseRate), 0);
   const categoryOptions = [...new Set(items.map((i) => i.category).filter((c): c is string => !!c))].sort((a, b) => a.localeCompare(b));
+  const filtersActive = stockSearch.trim() !== '' || categoryFilter !== 'all' || stockFilter !== 'all' || discountFilter !== 'all';
+  function enterFilterMode() {
+    if (formOpen) setFormOpen(false);
+  }
   const filteredItems = items.filter((item) => {
     const q = stockSearch.trim().toLowerCase();
     const stockQty = Number(item.stockQty);
@@ -654,20 +627,29 @@ export function ItemMasterPage() {
         </div>
       )}
 
-      <div style={{ background: color.paperRaised, border: `1px solid ${color.line}`, borderRadius: theme.radius, padding: 14, marginBottom: 12, boxShadow: theme.shadowSm }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+      <div style={{ background: color.paperRaised, border: `1px solid ${color.line}`, borderRadius: theme.radius, padding: 14, marginBottom: 12, boxShadow: theme.shadowSm }} onFocusCapture={enterFilterMode}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+          <strong style={{ fontSize: 14, color: color.ink }}>Stock List</strong>
+          <span style={{ fontSize: 12, color: color.inkFaint }}>
+            {filtersActive ? `${filteredItems.length} matching item${filteredItems.length === 1 ? '' : 's'}` : `${items.length} item${items.length === 1 ? '' : 's'}`}
+          </span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 1.4fr) minmax(150px, 0.8fr) minmax(130px, 0.7fr) minmax(140px, 0.75fr) auto', alignItems: 'end', gap: 10 }}>
           <label style={labelStyle}>
             Search stock
             <input
               value={stockSearch}
-              onChange={(e) => setStockSearch(e.currentTarget.value)}
+              onChange={(e) => {
+                enterFilterMode();
+                setStockSearch(e.currentTarget.value);
+              }}
               placeholder="SKU, category, brand, size, colour, barcode"
-              style={{ ...textInputStyle, width: 280 }}
+              style={{ ...textInputStyle, width: '100%' }}
             />
           </label>
           <label style={labelStyle}>
             Category
-            <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.currentTarget.value)} style={{ ...textInputStyle, width: 160 }}>
+            <select value={categoryFilter} onChange={(e) => { enterFilterMode(); setCategoryFilter(e.currentTarget.value); }} style={{ ...textInputStyle, width: '100%' }}>
               <option value="all">All categories</option>
               {categoryOptions.map((category) => (
                 <option key={category} value={category}>{category}</option>
@@ -676,7 +658,7 @@ export function ItemMasterPage() {
           </label>
           <label style={labelStyle}>
             Stock
-            <select value={stockFilter} onChange={(e) => setStockFilter(e.currentTarget.value as typeof stockFilter)} style={{ ...textInputStyle, width: 130 }}>
+            <select value={stockFilter} onChange={(e) => { enterFilterMode(); setStockFilter(e.currentTarget.value as typeof stockFilter); }} style={{ ...textInputStyle, width: '100%' }}>
               <option value="all">All stock</option>
               <option value="in">In stock</option>
               <option value="low">Low stock</option>
@@ -685,7 +667,7 @@ export function ItemMasterPage() {
           </label>
           <label style={labelStyle}>
             Discount
-            <select value={discountFilter} onChange={(e) => setDiscountFilter(e.currentTarget.value as typeof discountFilter)} style={{ ...textInputStyle, width: 150 }}>
+            <select value={discountFilter} onChange={(e) => { enterFilterMode(); setDiscountFilter(e.currentTarget.value as typeof discountFilter); }} style={{ ...textInputStyle, width: '100%' }}>
               <option value="all">All discounts</option>
               <option value="discounted">Discounted only</option>
               <option value="no-discount">No discount</option>
@@ -699,40 +681,10 @@ export function ItemMasterPage() {
               setStockFilter('all');
               setDiscountFilter('all');
             }}
-            style={{ padding: '9px 12px', background: 'transparent', border: `1px solid ${color.line}`, borderRadius: theme.radiusSm, cursor: 'pointer', color: color.inkSoft }}
+            style={{ padding: '9px 12px', background: 'transparent', border: `1px solid ${color.line}`, borderRadius: theme.radiusSm, cursor: 'pointer', color: color.inkSoft, whiteSpace: 'nowrap' }}
           >
             Clear filters
           </button>
-          <button
-            type="button"
-            onClick={() => setBulkUpdateOpen((open) => !open)}
-            style={{ marginLeft: 'auto', padding: '9px 14px', background: bulkUpdateOpen ? color.ledger : 'transparent', color: bulkUpdateOpen ? '#fff' : color.ledger, border: `1px solid ${color.ledger}`, borderRadius: theme.radiusSm, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
-          >
-            Bulk Update {bulkUpdateOpen ? '▲' : '▼'}
-          </button>
-          <div style={{ width: '100%', display: bulkUpdateOpen ? 'flex' : 'none', justifyContent: 'flex-end', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap', paddingTop: 10, borderTop: `1px dashed ${color.line}` }}>
-            <label style={labelStyle}>
-              Field
-              <select defaultValue="defaultDiscountPct" style={{ ...textInputStyle, width: 170 }}>
-                <option value="defaultDiscountPct">Default discount %</option>
-              </select>
-            </label>
-            <label style={labelStyle}>
-              Value
-              <input ref={bulkDiscountRef} defaultValue="" type="number" placeholder="e.g. 20" style={{ ...numberInputStyle, width: 120 }} />
-            </label>
-            <div style={{ maxWidth: 260, fontSize: 11.5, color: color.inkFaint, lineHeight: 1.35 }}>
-              Applies only to currently visible filtered stock. Existing posted bills are not changed.
-            </div>
-            <button
-              type="button"
-              onClick={() => void handleApplyDiscountToFiltered()}
-              disabled={bulkUpdatingDiscount || filteredItems.length === 0}
-              style={{ padding: '9px 14px', background: color.ledger, color: '#fff', border: 'none', borderRadius: theme.radiusSm, cursor: filteredItems.length === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600 }}
-            >
-              {bulkUpdatingDiscount ? 'Updating...' : `Apply to visible (${filteredItems.length})`}
-            </button>
-          </div>
         </div>
       </div>
 
