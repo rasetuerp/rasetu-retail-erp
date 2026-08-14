@@ -684,7 +684,7 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
     @page{size:${paperMm}mm auto;margin:0}
     *{box-sizing:border-box}
     body{margin:0;background:#fff;color:#000}
-    .receipt{width:${contentMm}mm;margin:0 0 0 ${sideMarginMm}mm;padding:1mm 0 0;text-align:center;overflow:hidden}
+    .receipt{width:${contentMm}mm;margin:0 0 0 ${sideMarginMm}mm;padding:1mm 0 2mm;text-align:center;overflow:visible}
     .header{font-family:"Nirmala UI","Noto Sans Kannada",Arial,sans-serif;line-height:1.18;text-align:center}
     .receipt-header-line{font-weight:600;white-space:pre-wrap;overflow-wrap:anywhere}
     .receipt-logo{display:block;height:auto;object-fit:contain;margin:0 auto .8mm;image-rendering:auto}
@@ -699,8 +699,9 @@ function receiptHtmlMetrics(settings: ReceiptSettings): { paperMm: number; conte
   const fallbackContentMm = paperMm === 80 ? 72 : 50;
   const fallbackSideMarginMm = paperMm === 80 ? 4 : 3;
   const fallbackFontPx = paperMm === 80 ? 9 : 9.5;
-  const contentMm = Math.max(36, Math.min(paperMm, Number(settings.receiptPrintableWidthMm) || fallbackContentMm));
   const sideMarginMm = Math.max(0, Math.min(12, Number(settings.receiptLeftMarginMm) || fallbackSideMarginMm));
+  const maxContentMm = Math.max(36, paperMm - sideMarginMm - 1);
+  const contentMm = Math.max(36, Math.min(maxContentMm, Number(settings.receiptPrintableWidthMm) || fallbackContentMm));
   const monoFontPx = Math.max(7, Math.min(12, Number(settings.receiptBodyFontPx) || fallbackFontPx));
   return { paperMm, contentMm, sideMarginMm, monoFontPx };
 }
@@ -739,7 +740,7 @@ export function buildReceiptCalibrationHtml(settings: ReceiptSettings = DEFAULT_
     @page{size:${paperMm}mm auto;margin:0}
     *{box-sizing:border-box}
     body{margin:0;background:#fff;color:#000}
-    .receipt{width:${contentMm}mm;margin:0 0 0 ${sideMarginMm}mm;padding:1mm 0 0;overflow:hidden}
+    .receipt{width:${contentMm}mm;margin:0 0 0 ${sideMarginMm}mm;padding:1mm 0 2mm;overflow:visible}
     pre{margin:0;text-align:left;font:${monoFontPx}px/1.22 "Courier New",Consolas,monospace;white-space:pre-wrap}
     .cut{margin-top:1mm;border-top:1px dashed #000;text-align:center;font:9px/1.2 Arial,sans-serif}
   </style></head><body><div class="receipt"><pre>${escapeHtml(rows)}</pre><div class="cut">CUT HERE</div></div></body></html>`;
