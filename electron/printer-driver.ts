@@ -278,6 +278,7 @@ export class TscPrinterDriver {
     const effectiveMarginLeft = this.settings.marginLeft + (template.xOffsetMm ?? 0);
     const effectiveMarginTop = this.settings.marginTop + (template.yOffsetMm ?? 0);
     const effectiveDarkness = template.darkness ?? this.settings.darknessFactor;
+    const chunks: Buffer[] = [];
     const lines: string[] = [
       `SIZE ${width.toFixed(1)} mm,${height.toFixed(1)} mm`,
       `GAP ${gap.toFixed(1)} mm,0 mm`,
@@ -288,6 +289,12 @@ export class TscPrinterDriver {
       'SPEED 4',
       'CLS',
     ];
+
+    function flushLines() {
+      if (lines.length === 0) return;
+      chunks.push(Buffer.from(`${lines.join('\r\n')}\r\n`, 'utf8'));
+      lines.length = 0;
+    }
 
     for (const element of template.elements) {
       const transformed = transformElement(element, this.settings);
@@ -352,7 +359,10 @@ export class TscPrinterDriver {
         for (let row = 0; row < heightDots; row += rowsPerBand) {
           const bandRows = Math.min(rowsPerBand, heightDots - row);
           const bandHex = hex.slice(row * rowHexChars, (row + bandRows) * rowHexChars);
-          lines.push(`BITMAP ${x},${y + row},${bytesPerRow},${bandRows},0,${bandHex}`);
+          flushLines();
+          chunks.push(Buffer.from(`BITMAP ${x},${y + row},${bytesPerRow},${bandRows},0,`, 'ascii'));
+          chunks.push(Buffer.from(bandHex, 'hex'));
+          chunks.push(Buffer.from('\r\n', 'ascii'));
         }
         continue;
       }
@@ -365,7 +375,8 @@ export class TscPrinterDriver {
     }
 
     lines.push(`PRINT ${Math.max(1, copies)}`);
-    return Buffer.from(`${lines.join('\r\n')}\r\n`, 'utf8');
+    flushLines();
+    return Buffer.concat(chunks);
   }
 
   getSettings(): PrinterSettings {
