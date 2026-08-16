@@ -897,11 +897,11 @@ function ReceiptSettingsCard() {
           </label>
           <label style={labelStyle}>
             Receipt body font (px)
-            <input ref={receiptBodyFontPxRef} key={`receipt-font-px-${settings.receiptBodyFontPx}`} type="number" min={0} max={12} step="0.5" defaultValue={settings.receiptBodyFontPx ?? 0} placeholder={settings.columns === 48 ? '9' : '9.5'} style={{ ...inputStyle, width: 130 }} />
+            <input ref={receiptBodyFontPxRef} key={`receipt-font-px-${settings.receiptBodyFontPx}`} type="number" min={0} max={12} step="0.5" defaultValue={settings.receiptBodyFontPx ?? 0} placeholder={settings.columns === 48 ? '10.5' : '10'} style={{ ...inputStyle, width: 130 }} />
           </label>
         </div>
         <div style={{ fontSize: 11.5, color: color.inkFaint, lineHeight: 1.4 }}>
-          Use 48 columns for 3 inch rolls. Leave mm/font fields at 0 for auto defaults; adjust them only after printing the receipt calibration test.
+          Use 48 columns for 3 inch rolls. Leave mm/font fields at 0 for safe thermal defaults; adjust them only after printing the receipt calibration test.
         </div>
 
         <div style={{ borderTop: `1px solid ${color.lineSoft}`, margin: '4px 0' }} />

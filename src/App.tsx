@@ -561,11 +561,11 @@ function PrinterSettingsModal({ onClose }: { onClose: () => void }) {
                     </label>
                     <label style={pdLabel}>
                       Body font (px)
-                      <input type="number" min={0} max={12} step="0.5" value={receiptSettings.receiptBodyFontPx ?? 0} placeholder={receiptSettings.columns === 48 ? '9' : '9.5'} onChange={(e) => patchReceiptPaper({ receiptBodyFontPx: Number(e.target.value) || 0 })} style={pdInput} />
+                      <input type="number" min={0} max={12} step="0.5" value={receiptSettings.receiptBodyFontPx ?? 0} placeholder={receiptSettings.columns === 48 ? '10.5' : '10'} onChange={(e) => patchReceiptPaper({ receiptBodyFontPx: Number(e.target.value) || 0 })} style={pdInput} />
                     </label>
                   </div>
                   <div style={{ background: color.paper, border: `1px solid ${color.lineSoft}`, borderRadius: theme.radiusSm, padding: 8, fontSize: 11.5, color: color.inkSoft, lineHeight: 1.4, marginBottom: 10 }}>
-                    Print the HTML calibration test after changing width/margin/font. If left text cuts, increase left margin. If amounts wrap or cut, reduce print width or font size.
+                    Print the receipt calibration test after changing width/margin/font. The app now keeps a safe thermal column width automatically; if left text cuts, increase left margin. If text is still too wide, reduce print width slightly.
                   </div>
                 </>
               )}

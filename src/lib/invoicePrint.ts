@@ -644,18 +644,20 @@ function buildReceiptHeaderHtml(inv: PrintableInvoice, settings: ReceiptSettings
 
 export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: ThermalLayout, settings: ReceiptSettings = DEFAULT_RECEIPT_SETTINGS): string {
   const { paperMm, contentMm, sideMarginMm, monoFontPx } = receiptHtmlMetrics(settings);
-  const text = buildThermalReceipt(invoice, layout, settings);
+  const htmlColumns = receiptHtmlContentColumns(settings, contentMm, monoFontPx);
+  const htmlPaperSettings = { ...settings, columns: htmlColumns, marginLeftChars: 0, marginRightChars: 0 };
+  const text = buildThermalReceipt(invoice, layout, htmlPaperSettings);
   const blockSettings = { ...settings, endFeedLines: 0 };
   if (layout !== 'receipt') {
     return `<!doctype html><html><head><meta charset="utf-8" /><style>
       @page{size:${paperMm}mm auto;margin:0}
       body{margin:0;background:#fff;color:#000}
-      pre{box-sizing:border-box;width:${contentMm}mm;margin:0 0 0 ${sideMarginMm}mm;padding:1mm 0 0;font:${monoFontPx}px/1.22 "Courier New",Consolas,monospace;white-space:pre-wrap}
+      pre{box-sizing:border-box;width:${contentMm}mm;margin:0 0 0 ${sideMarginMm}mm;padding:1mm 0 2mm;font:700 ${monoFontPx}px/1.24 "Courier New",Consolas,monospace;white-space:pre-wrap;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact;text-rendering:geometricPrecision}
       .cut{width:${contentMm}mm;margin:1mm 0 0 ${sideMarginMm}mm;border-top:1px dashed #000;text-align:center;font:9px/1.2 Arial,sans-serif}
     </style></head><body><pre>${escapeHtml(text)}</pre><div class="cut">CUT HERE</div></body></html>`;
   }
 
-  const effectiveSettings = { ...settings, columns: receiptContentColumns(settings) };
+  const effectiveSettings = htmlPaperSettings;
   const htmlBlocks: string[] = [];
   for (const key of enabledReceiptSections(effectiveSettings)) {
     if (key === 'header') {
@@ -671,25 +673,25 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
         `Bill: ${invoice.number}`,
         new Date(invoice.date).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }),
       ].filter(Boolean);
-      htmlBlocks.push(`<pre>${escapeHtml(applyReceiptPaper(companyLines.join('\n'), blockSettings))}</pre>`);
+      htmlBlocks.push(`<pre>${escapeHtml(applyReceiptPaper(companyLines.join('\n'), { ...blockSettings, columns: htmlColumns, marginLeftChars: 0, marginRightChars: 0 }))}</pre>`);
       continue;
     }
     const def = SECTION_BUILDERS[key];
     const lines = def.build(invoice, effectiveSettings);
     if (def.dividerAfter) lines.push(divider(effectiveSettings.columns));
-    if (lines.length) htmlBlocks.push(`<pre>${escapeHtml(applyReceiptPaper(lines.join('\n'), blockSettings))}</pre>`);
+    if (lines.length) htmlBlocks.push(`<pre>${escapeHtml(applyReceiptPaper(lines.join('\n'), { ...blockSettings, columns: htmlColumns, marginLeftChars: 0, marginRightChars: 0 }))}</pre>`);
   }
   const feedMm = Math.max(0, Math.min(5, Math.floor(settings.endFeedLines ?? 0))) * 2.8;
   return `<!doctype html><html><head><meta charset="utf-8" /><style>
     @page{size:${paperMm}mm auto;margin:0}
     *{box-sizing:border-box}
-    body{margin:0;background:#fff;color:#000}
+    body{margin:0;background:#fff;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}
     .receipt{width:${contentMm}mm;margin:0 0 0 ${sideMarginMm}mm;padding:1mm 0 2mm;text-align:center;overflow:visible}
-    .header{font-family:"Nirmala UI","Noto Sans Kannada",Arial,sans-serif;line-height:1.18;text-align:center}
-    .receipt-header-line{font-weight:600;white-space:pre-wrap;overflow-wrap:anywhere}
+    .header{font-family:"Nirmala UI","Noto Sans Kannada",Arial,sans-serif;line-height:1.14;text-align:center;color:#000}
+    .receipt-header-line{font-weight:800;white-space:pre-wrap;overflow-wrap:anywhere;color:#000}
     .receipt-logo{display:block;height:auto;object-fit:contain;margin:0 auto .8mm;image-rendering:auto}
-    pre{margin:0;text-align:left;font:${monoFontPx}px/1.22 "Courier New",Consolas,monospace;white-space:pre-wrap}
-    .cut{margin-top:1mm;border-top:1px dashed #000;text-align:center;font:9px/1.2 Arial,sans-serif}
+    pre{margin:0;text-align:left;font:700 ${monoFontPx}px/1.24 "Courier New",Consolas,monospace;white-space:pre-wrap;color:#000;text-rendering:geometricPrecision}
+    .cut{margin-top:1mm;border-top:1px dashed #000;text-align:center;font:700 9px/1.2 Arial,sans-serif;color:#000}
     .feed{height:${feedMm}mm}
   </style></head><body><div class="receipt">${htmlBlocks.join('')}<div class="cut">CUT HERE</div><div class="feed"></div></div></body></html>`;
 }
@@ -698,17 +700,29 @@ function receiptHtmlMetrics(settings: ReceiptSettings): { paperMm: number; conte
   const paperMm = (settings.columns ?? 32) >= 48 ? 80 : 58;
   const fallbackContentMm = paperMm === 80 ? 72 : 50;
   const fallbackSideMarginMm = paperMm === 80 ? 4 : 3;
-  const fallbackFontPx = paperMm === 80 ? 9 : 9.5;
+  const fallbackFontPx = paperMm === 80 ? 10.5 : 10;
   const sideMarginMm = Math.max(0, Math.min(12, Number(settings.receiptLeftMarginMm) || fallbackSideMarginMm));
   const maxContentMm = Math.max(36, paperMm - sideMarginMm - 1);
   const contentMm = Math.max(36, Math.min(maxContentMm, Number(settings.receiptPrintableWidthMm) || fallbackContentMm));
-  const monoFontPx = Math.max(7, Math.min(12, Number(settings.receiptBodyFontPx) || fallbackFontPx));
+  const monoFontPx = Math.max(10, Math.min(12, Number(settings.receiptBodyFontPx) || fallbackFontPx));
   return { paperMm, contentMm, sideMarginMm, monoFontPx };
+}
+
+function receiptHtmlContentColumns(settings: ReceiptSettings, contentMm: number, monoFontPx: number): number {
+  const requestedColumns = receiptContentColumns(settings);
+  // Browser print renders text as pixels before the Windows thermal driver
+  // rasterizes it. A full 48 text columns can mathematically fit on 80mm, but
+  // thermal heads print it too faintly and clip near the edge. Calculate a
+  // conservative HTML-only column count from the actual mm width and font.
+  const pxPerMm = 96 / 25.4;
+  const monoCharPx = monoFontPx * 0.62;
+  const safeColumns = Math.floor((contentMm * pxPerMm) / monoCharPx) - 2;
+  return Math.max(24, Math.min(requestedColumns, safeColumns));
 }
 
 export function buildReceiptCalibrationHtml(settings: ReceiptSettings = DEFAULT_RECEIPT_SETTINGS): string {
   const { paperMm, contentMm, sideMarginMm, monoFontPx } = receiptHtmlMetrics(settings);
-  const columns = receiptContentColumns(settings);
+  const columns = receiptHtmlContentColumns(settings, contentMm, monoFontPx);
   const line = divider(columns);
   const amountWidth = 14;
   const labelWidth = Math.max(5, columns - 1 - amountWidth);
@@ -739,10 +753,10 @@ export function buildReceiptCalibrationHtml(settings: ReceiptSettings = DEFAULT_
   return `<!doctype html><html><head><meta charset="utf-8" /><style>
     @page{size:${paperMm}mm auto;margin:0}
     *{box-sizing:border-box}
-    body{margin:0;background:#fff;color:#000}
+    body{margin:0;background:#fff;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}
     .receipt{width:${contentMm}mm;margin:0 0 0 ${sideMarginMm}mm;padding:1mm 0 2mm;overflow:visible}
-    pre{margin:0;text-align:left;font:${monoFontPx}px/1.22 "Courier New",Consolas,monospace;white-space:pre-wrap}
-    .cut{margin-top:1mm;border-top:1px dashed #000;text-align:center;font:9px/1.2 Arial,sans-serif}
+    pre{margin:0;text-align:left;font:700 ${monoFontPx}px/1.24 "Courier New",Consolas,monospace;white-space:pre-wrap;color:#000;text-rendering:geometricPrecision}
+    .cut{margin-top:1mm;border-top:1px dashed #000;text-align:center;font:700 9px/1.2 Arial,sans-serif;color:#000}
   </style></head><body><div class="receipt"><pre>${escapeHtml(rows)}</pre><div class="cut">CUT HERE</div></div></body></html>`;
 }
 
