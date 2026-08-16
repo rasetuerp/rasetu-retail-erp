@@ -647,7 +647,6 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
   const htmlColumns = receiptHtmlContentColumns(settings, contentMm, monoFontPx);
   const htmlPaperSettings = { ...settings, columns: htmlColumns, marginLeftChars: 0, marginRightChars: 0 };
   const text = buildThermalReceipt(invoice, layout, htmlPaperSettings);
-  const blockSettings = { ...settings, endFeedLines: 0 };
   if (layout !== 'receipt') {
     return `<!doctype html><html><head><meta charset="utf-8" /><style>
       @page{size:${paperMm}mm auto;margin:0}
@@ -657,43 +656,136 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
     </style></head><body><pre>${escapeHtml(text)}</pre><div class="cut">CUT HERE</div></body></html>`;
   }
 
-  const effectiveSettings = htmlPaperSettings;
-  const htmlBlocks: string[] = [];
-  for (const key of enabledReceiptSections(effectiveSettings)) {
-    if (key === 'header') {
-      const company = invoice.company;
-      htmlBlocks.push(`<div class="header">${buildReceiptHeaderHtml(invoice, settings)}</div>`);
-      const companyLines = [
-        company?.address ? receiptCenter(company.address, effectiveSettings.columns) : '',
-        company?.phone ? receiptCenter(`Ph: ${company.phone}`, effectiveSettings.columns) : '',
-        company?.gstin ? receiptCenter(`GSTIN: ${company.gstin}`, effectiveSettings.columns) : '',
-        divider(effectiveSettings.columns),
-        receiptCenter('TAX INVOICE', effectiveSettings.columns),
-        divider(effectiveSettings.columns),
-        `Bill: ${invoice.number}`,
-        new Date(invoice.date).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }),
-      ].filter(Boolean);
-      htmlBlocks.push(`<pre>${escapeHtml(applyReceiptPaper(companyLines.join('\n'), { ...blockSettings, columns: htmlColumns, marginLeftChars: 0, marginRightChars: 0 }))}</pre>`);
-      continue;
-    }
-    const def = SECTION_BUILDERS[key];
-    const lines = def.build(invoice, effectiveSettings);
-    if (def.dividerAfter) lines.push(divider(effectiveSettings.columns));
-    if (lines.length) htmlBlocks.push(`<pre>${escapeHtml(applyReceiptPaper(lines.join('\n'), { ...blockSettings, columns: htmlColumns, marginLeftChars: 0, marginRightChars: 0 }))}</pre>`);
-  }
   const feedMm = Math.max(0, Math.min(5, Math.floor(settings.endFeedLines ?? 0))) * 2.8;
+  const enabled = new Set(enabledReceiptSections(htmlPaperSettings));
+  const paymentLabel = invoice.payments?.length
+    ? invoice.payments.map((p) => p.mode).filter(Boolean).join(' + ')
+    : 'Not recorded';
+  const gstRows = receiptGstRows(invoice);
+  const itemRows = invoice.items
+    .map((line) => {
+      const discount = Number(line.discountPct);
+      const meta = [
+        line.item.hsn ? `HSN ${line.item.hsn}` : '',
+        `GST ${line.gstRate}%`,
+        discount > 0 ? `Disc ${discount.toFixed(2)}%` : '',
+      ].filter(Boolean).join(' · ');
+      return `<div class="item-row">
+        <div class="item-name">${escapeHtml(displayName(line.item))}</div>
+        <div class="item-qty">${Number(line.qty)}</div>
+        <div class="num">${money(lineSaleUnitPrice(line))}</div>
+        <div class="num">${money(lineChargedAmount(line))}</div>
+        ${meta ? `<div class="item-meta">${escapeHtml(meta)}</div>` : ''}
+      </div>`;
+    })
+    .join('');
+  const totalQty = invoice.items.reduce((sum, line) => sum + Number(line.qty), 0);
+  const interState = Number(invoice.igst) > 0;
+  const paymentsTotal = invoice.payments?.reduce((sum, p) => sum + Number(p.amount), 0) ?? 0;
+  const amountDue = Math.max(0, Number(invoice.total) - paymentsTotal);
+  const moneyRow = (label: string, amount: string | number, extraClass = '') =>
+    `<div class="money-row ${extraClass}"><span>${escapeHtml(label)}</span><span>${money(amount)}</span></div>`;
+  const sections = {
+    header: enabled.has('header') ? `<div class="header">${buildReceiptHeaderHtml(invoice, settings)}</div>
+      <div class="shop-meta">
+        ${invoice.company?.address ? `<div>${escapeHtml(invoice.company.address)}</div>` : ''}
+        ${invoice.company?.phone ? `<div>Ph: ${escapeHtml(invoice.company.phone)}</div>` : ''}
+        ${invoice.company?.gstin ? `<div>GSTIN: ${escapeHtml(invoice.company.gstin)}</div>` : ''}
+      </div>
+      <div class="dash"></div>
+      <div class="doc-title">TAX INVOICE</div>
+      <div class="dash"></div>` : '',
+    customer: enabled.has('cashierCustomer') ? `<div class="meta-grid">
+        <div><span>Bill</span><strong>${escapeHtml(invoice.number)}</strong></div>
+        <div class="right"><span>Date</span><strong>${escapeHtml(formatReceiptDate(invoice.date))}</strong></div>
+        <div><span>Customer</span><strong>${escapeHtml(invoice.party?.name ?? 'Walk-in')}</strong></div>
+        <div class="right"><span>Payment</span><strong>${escapeHtml(paymentLabel)}</strong></div>
+      </div>
+      <div class="dash"></div>` : '',
+    items: `<div class="items">
+        <div class="item-head"><span>Item</span><span>Qty</span><span>Rate</span><span>Amount</span></div>
+        ${itemRows}
+      </div>
+      <div class="dash"></div>`,
+    totals: `<div class="totals">
+        <div class="summary-line"><span>Items ${invoice.items.length}</span><span>Qty ${totalQty}</span></div>
+        ${Number(invoice.discountAmt) > 0 ? `<div class="money-row"><span>Discount</span><span>-${money(invoice.discountAmt)}</span></div>` : ''}
+        ${moneyRow('Taxable', invoice.subtotal)}
+        ${interState ? moneyRow('IGST', invoice.igst) : `${moneyRow('CGST', invoice.cgst)}${moneyRow('SGST', invoice.sgst)}`}
+        ${Number(invoice.roundOff) !== 0 ? moneyRow('Round off', invoice.roundOff) : ''}
+      </div>
+      <div class="grand"><span>Total</span><strong>Rs ${money(invoice.total)}</strong></div>`,
+    paidLine: enabled.has('paidLine') && invoice.payments?.length
+      ? `<div class="paid">${invoice.payments.map((p) => `<div><span>Paid ${escapeHtml(p.mode)}</span><strong>${money(p.amount)}</strong></div>`).join('')}${amountDue > 0.01 ? `<div><span>Due</span><strong>${money(amountDue)}</strong></div>` : ''}</div>`
+      : '',
+    words: enabled.has('amountInWords') ? `<div class="words">${escapeHtml(numberToWordsIndian(Number(invoice.total)))}</div><div class="dash"></div>` : '<div class="dash"></div>',
+    gst: enabled.has('gstBreakup') && gstRows
+      ? `<div class="gst-table">
+          <div class="gst-head">${interState ? '<span>GST%</span><span>Taxable</span><span>IGST</span>' : '<span>GST%</span><span>Taxable</span><span>CGST</span><span>SGST</span>'}</div>
+          ${gstRows}
+        </div>
+        <div class="dash"></div>`
+      : '',
+    savings: enabled.has('savingsLine') && settings.showSavingsLine && Number(invoice.discountAmt) > 0
+      ? `<div class="center small strong">You saved Rs ${Math.round(Number(invoice.discountAmt))} today</div>`
+      : '',
+    custom: enabled.has('customMessage') && settings.customMessageText
+      ? `<div class="center small">${escapeHtml(settings.customMessageText).replace(/\n/g, '<br>')}</div>`
+      : '',
+    payment: enabled.has('paymentInfo') && settings.paymentInfoText
+      ? `<div class="payment-note"><div class="qr-box">QR</div><div>${escapeHtml(settings.paymentInfoText)}</div></div>`
+      : '',
+    exchange: enabled.has('exchangePolicy') && settings.exchangePolicyText
+      ? `<div class="center small policy">${escapeHtml(settings.exchangePolicyText).replace(/\n/g, '<br>')}</div>`
+      : '',
+    cashier: enabled.has('cashier') && invoice.cashierName ? `<div class="center small">Billed by: ${escapeHtml(invoice.cashierName)}</div>` : '',
+    footer: enabled.has('footer') ? `<div class="thanks">${escapeHtml(settings.footerText || 'Thank you, visit again')}</div><div class="powered">Powered by RaSetu ERP</div>` : '',
+  };
   return `<!doctype html><html><head><meta charset="utf-8" /><style>
     @page{size:${paperMm}mm auto;margin:0}
     *{box-sizing:border-box}
     body{margin:0;background:#fff;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    .receipt{width:${contentMm}mm;margin:0 0 0 ${sideMarginMm}mm;padding:1mm 0 2mm;text-align:center;overflow:visible}
-    .header{font-family:"Nirmala UI","Noto Sans Kannada",Arial,sans-serif;line-height:1.14;text-align:center;color:#000}
+    .receipt{width:${contentMm}mm;margin:0 0 0 ${sideMarginMm}mm;padding:1mm 0 2mm;overflow:visible;font:700 ${monoFontPx}px/1.24 "Courier New",Consolas,monospace;color:#000;text-rendering:geometricPrecision}
+    .header{font-family:"Nirmala UI","Noto Sans Kannada",Arial,sans-serif;line-height:1.12;text-align:center;color:#000;margin-bottom:.7mm}
     .receipt-header-line{font-weight:800;white-space:pre-wrap;overflow-wrap:anywhere;color:#000}
     .receipt-logo{display:block;height:auto;object-fit:contain;margin:0 auto .8mm;image-rendering:auto}
-    pre{margin:0;text-align:left;font:700 ${monoFontPx}px/1.24 "Courier New",Consolas,monospace;white-space:pre-wrap;color:#000;text-rendering:geometricPrecision}
-    .cut{margin-top:1mm;border-top:1px dashed #000;text-align:center;font:700 9px/1.2 Arial,sans-serif;color:#000}
+    .shop-meta,.center{text-align:center}
+    .shop-meta{font-size:${Math.max(9, monoFontPx - 1)}px;line-height:1.26;margin-bottom:.8mm}
+    .dash{border-top:1px dashed #000;margin:1.4mm 0}
+    .doc-title{text-align:center;font-size:${Math.max(10, monoFontPx)}px;font-weight:800;letter-spacing:.3px}
+    .meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:.8mm 2mm}
+    .meta-grid span{display:block;font-size:${Math.max(8, monoFontPx - 2)}px;font-weight:700}
+    .meta-grid strong{display:block;font-size:${Math.max(9, monoFontPx - 1)}px;font-weight:800;overflow-wrap:anywhere}
+    .right{text-align:right}
+    .items{width:100%}
+    .item-head,.item-row{display:grid;grid-template-columns:minmax(0,2fr) .45fr .9fr .95fr;gap:1mm;align-items:start}
+    .item-head{font-size:${Math.max(8, monoFontPx - 2)}px;font-weight:800;margin-bottom:.8mm}
+    .item-head span:nth-child(n+2),.item-qty,.num{text-align:right}
+    .item-row{padding:.5mm 0}
+    .item-name{overflow-wrap:anywhere}
+    .item-meta{grid-column:1 / -1;font-size:${Math.max(8, monoFontPx - 2)}px;font-weight:700}
+    .totals{display:grid;gap:.7mm}
+    .summary-line,.money-row,.paid div{display:flex;justify-content:space-between;gap:2mm}
+    .money-row span:last-child,.paid strong{font-weight:800;text-align:right}
+    .grand{display:flex;justify-content:space-between;align-items:center;border-top:1px solid #000;border-bottom:1px solid #000;margin:1.6mm 0;padding:1.3mm 0;font-weight:800}
+    .grand strong{font-size:${Math.min(18, monoFontPx + 5)}px}
+    .paid{margin:1mm 0}
+    .words{font-size:${Math.max(8, monoFontPx - 1)}px;text-align:center;margin:1mm 0;overflow-wrap:anywhere}
+    .gst-table{font-size:${Math.max(8, monoFontPx - 1)}px}
+    .gst-head,.gst-row{display:grid;${interState ? 'grid-template-columns:.65fr 1fr 1fr' : 'grid-template-columns:.55fr 1fr .9fr .9fr'};gap:1mm}
+    .gst-head{font-weight:800;margin-bottom:.5mm}
+    .gst-head span:nth-child(n+2),.gst-row span:nth-child(n+2){text-align:right}
+    .small{font-size:${Math.max(8, monoFontPx - 1)}px;line-height:1.32}
+    .strong{font-weight:800}
+    .payment-note{display:flex;gap:2mm;align-items:center;justify-content:center;margin:1.5mm 0;font-size:${Math.max(8, monoFontPx - 1)}px;line-height:1.3}
+    .qr-box{width:13mm;height:13mm;border:1px solid #000;display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0}
+    .policy{margin-top:1mm}
+    .thanks{text-align:center;font-size:${Math.max(10, monoFontPx)}px;font-weight:800;margin-top:1.4mm}
+    .powered{text-align:center;font-size:${Math.max(8, monoFontPx - 1)}px;margin-top:.6mm}
+    .cut{display:flex;align-items:center;gap:1mm;margin-top:2mm;font:800 9px/1.2 Arial,sans-serif;color:#000}
+    .cut:before,.cut:after{content:"";flex:1;border-top:1px dashed #000}
     .feed{height:${feedMm}mm}
-  </style></head><body><div class="receipt">${htmlBlocks.join('')}<div class="cut">CUT HERE</div><div class="feed"></div></div></body></html>`;
+  </style></head><body><div class="receipt">${sections.header}${sections.customer}${sections.items}${sections.totals}${sections.paidLine}${sections.words}${sections.gst}${sections.savings}${sections.custom}${sections.payment}${sections.exchange}${sections.cashier}${sections.footer}<div class="cut">CUT HERE</div><div class="feed"></div></div></body></html>`;
 }
 
 function receiptHtmlMetrics(settings: ReceiptSettings): { paperMm: number; contentMm: number; sideMarginMm: number; monoFontPx: number } {
@@ -718,6 +810,31 @@ function receiptHtmlContentColumns(settings: ReceiptSettings, contentMm: number,
   const monoCharPx = monoFontPx * 0.62;
   const safeColumns = Math.floor((contentMm * pxPerMm) / monoCharPx) - 2;
   return Math.max(24, Math.min(requestedColumns, safeColumns));
+}
+
+function formatReceiptDate(value: string): string {
+  return new Date(value).toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function receiptGstRows(inv: PrintableInvoice): string {
+  const byRate = new Map<string, number>();
+  for (const line of inv.items) byRate.set(line.gstRate, (byRate.get(line.gstRate) ?? 0) + Number(line.amount));
+  const interState = Number(inv.igst) > 0;
+  return [...byRate.entries()]
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .map(([rate, taxable]) => {
+      const gstAmt = taxable * (Number(rate) / 100);
+      return interState
+        ? `<div class="gst-row"><span>${escapeHtml(rate)}%</span><span>${taxable.toFixed(2)}</span><span>${gstAmt.toFixed(2)}</span></div>`
+        : `<div class="gst-row"><span>${escapeHtml(rate)}%</span><span>${taxable.toFixed(2)}</span><span>${(gstAmt / 2).toFixed(2)}</span><span>${(gstAmt / 2).toFixed(2)}</span></div>`;
+    })
+    .join('');
 }
 
 export function buildReceiptCalibrationHtml(settings: ReceiptSettings = DEFAULT_RECEIPT_SETTINGS): string {
