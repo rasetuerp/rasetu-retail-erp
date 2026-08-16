@@ -1,7 +1,7 @@
 {
   "name": "rasetu-retail-erp",
   "private": true,
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "RetailBilling by Rasetu — cloth store v1, generic retail later",
   "author": "Rasetu",
   "type": "module",
