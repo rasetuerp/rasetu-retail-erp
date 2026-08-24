@@ -661,28 +661,34 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
   const paymentLabel = invoice.payments?.length
     ? invoice.payments.map((p) => p.mode).filter(Boolean).join(' + ')
     : 'Not recorded';
+  const interState = Number(invoice.igst) > 0;
   const gstRows = receiptGstRows(invoice);
   const itemRows = invoice.items
     .map((line, index) => {
       const discount = Number(line.discountPct);
-      const meta = [
+      const gstRate = Number(line.gstRate);
+      const taxable = Number(line.amount);
+      const gstValue = taxable * (gstRate / 100);
+      const taxDetail = interState
+        ? `GST ${line.gstRate}% (${money(gstValue)}) on ${money(taxable)}`
+        : `GST ${line.gstRate}% (C ${money(gstValue / 2)} + S ${money(gstValue / 2)}) on ${money(taxable)}`;
+      const priceDetail = [
         line.item.hsn ? `HSN ${line.item.hsn}` : '',
-        `GST ${line.gstRate}%`,
+        `MRP ${money(line.rate)}`,
+        discount > 0 ? `${discount.toFixed(2)}% off` : '',
       ].filter(Boolean).join(' · ');
       return `<div class="item-row">
         <div class="item-sno">${index + 1}</div>
         <div class="item-name">${escapeHtml(displayName(line.item))}</div>
         <div class="item-qty">${Number(line.qty)}</div>
-        <div class="num">${money(line.rate)}</div>
-        <div class="num">${discount > 0 ? `${discount.toFixed(2)}%` : '-'}</div>
         <div class="num">${money(lineChargedAmount(line))}</div>
-        ${meta ? `<div class="item-meta">${escapeHtml(meta)}</div>` : ''}
+        <div class="item-meta">${escapeHtml(priceDetail)}</div>
+        <div class="item-meta">${escapeHtml(taxDetail)}</div>
       </div>`;
     })
     .join('');
   const totalQty = invoice.items.reduce((sum, line) => sum + Number(line.qty), 0);
   const totalSavings = receiptTotalSavings(invoice);
-  const interState = Number(invoice.igst) > 0;
   const paymentsTotal = invoice.payments?.reduce((sum, p) => sum + Number(p.amount), 0) ?? 0;
   const amountDue = Math.max(0, Number(invoice.total) - paymentsTotal);
   const moneyRow = (label: string, amount: string | number, extraClass = '') =>
@@ -705,15 +711,15 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
       </div>
       <div class="dash"></div>` : '',
     items: `<div class="items">
-        <div class="item-head"><span>S.No.</span><span>Item</span><span>Qty</span><span>MRP</span><span>Disc</span><span>Amount</span></div>
+        <div class="item-head"><span>#</span><span>Item</span><span>Qty</span><span>Amount</span></div>
         ${itemRows}
       </div>
       <div class="dash"></div>`,
     totals: `<div class="totals">
-        <div class="summary-line"><span>Items ${invoice.items.length}</span><span>Qty ${totalQty}</span></div>
-        ${Number(invoice.discountAmt) > 0 ? `<div class="money-row"><span>Discount</span><span>-${money(invoice.discountAmt)}</span></div>` : ''}
-        ${moneyRow('Taxable', invoice.subtotal)}
+        <div class="summary-line"><span>Items / Qty</span><strong>${invoice.items.length} / ${totalQty}</strong></div>
+        ${moneyRow('Taxable value', invoice.subtotal)}
         ${interState ? moneyRow('IGST', invoice.igst) : `${moneyRow('CGST', invoice.cgst)}${moneyRow('SGST', invoice.sgst)}`}
+        ${Number(invoice.discountAmt) > 0 ? `<div class="money-row"><span>Bill discount</span><span>-${money(invoice.discountAmt)}</span></div>` : ''}
         ${Number(invoice.roundOff) !== 0 ? moneyRow('Round off', invoice.roundOff) : ''}
       </div>
       <div class="grand"><span>Total</span><strong>Rs ${money(invoice.total)}</strong></div>`,
@@ -760,7 +766,7 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
     .meta-grid strong{display:block;font-size:${Math.max(9, monoFontPx - 1)}px;font-weight:800;overflow-wrap:anywhere}
     .right{text-align:right}
     .items{width:100%}
-    .item-head,.item-row{display:grid;grid-template-columns:.45fr minmax(0,1.55fr) .45fr .85fr .6fr .95fr;gap:.8mm;align-items:start}
+    .item-head,.item-row{display:grid;grid-template-columns:.45fr minmax(0,1fr) .45fr 1fr;gap:.8mm;align-items:start}
     .item-head{font-size:${Math.max(8, monoFontPx - 2)}px;font-weight:800;margin-bottom:.8mm}
     .item-head span:nth-child(n+3),.item-qty,.num{text-align:right}
     .item-row{padding:.5mm 0}
@@ -769,7 +775,7 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
     .item-meta{grid-column:2 / -1;font-size:${Math.max(8, monoFontPx - 2)}px;font-weight:700}
     .totals{display:grid;gap:.7mm}
     .summary-line,.money-row,.paid div{display:flex;justify-content:space-between;gap:2mm}
-    .money-row span:last-child,.paid strong{font-weight:800;text-align:right}
+    .summary-line strong,.money-row span:last-child,.paid strong{font-weight:800;text-align:right}
     .grand{display:flex;justify-content:space-between;align-items:center;border-top:1px solid #000;border-bottom:1px solid #000;margin:1.6mm 0;padding:1.3mm 0;font-weight:800}
     .grand strong{font-size:${Math.min(18, monoFontPx + 5)}px}
     .paid{margin:1mm 0}
