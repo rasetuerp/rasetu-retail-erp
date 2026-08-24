@@ -55,6 +55,7 @@ const printConfigSchema = z
     xOffsetMm: z.number().default(0),
     yOffsetMm: z.number().default(0),
     dpi: z.union([z.literal(203), z.literal(300)]).default(203),
+    printDirection: z.enum(['normal', 'rotate-180', 'mirror-left-right', 'mirror-top-bottom']).default('normal'),
   })
   // Round 21 — loopZone (and any future printConfig field) round-trips
   // through this the same way labelElementSchema above already does; without

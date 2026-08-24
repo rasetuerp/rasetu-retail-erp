@@ -59,6 +59,7 @@ export interface LabelTemplate {
   yOffsetMm?: number;
   gapMm?: number;
   darkness?: number;
+  printDirection?: 'normal' | 'rotate-180' | 'mirror-left-right' | 'mirror-top-bottom';
 }
 
 export interface PrinterProfile {
@@ -194,6 +195,20 @@ function rotationForOrientation(orientation: PrinterSettings['orientation']): 0 
   }
 }
 
+function tsplDirectionCommand(direction: LabelTemplate['printDirection']): string {
+  switch (direction) {
+    case 'rotate-180':
+      return 'DIRECTION 1,0';
+    case 'mirror-left-right':
+      return 'DIRECTION 0,1';
+    case 'mirror-top-bottom':
+      return 'DIRECTION 1,1';
+    case 'normal':
+    default:
+      return 'DIRECTION 0,0';
+  }
+}
+
 function transformElement(
   element: LabelElement,
   settings: PrinterSettings
@@ -283,7 +298,7 @@ export class TscPrinterDriver {
       `SIZE ${width.toFixed(1)} mm,${height.toFixed(1)} mm`,
       `GAP ${gap.toFixed(1)} mm,0 mm`,
       'CODEPAGE UTF-8',
-      'DIRECTION 0',
+      tsplDirectionCommand(template.printDirection),
       'REFERENCE 0,0',
       `DENSITY ${clamp(effectiveDarkness, 0, 15)}`,
       'SPEED 4',

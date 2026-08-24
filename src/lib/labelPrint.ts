@@ -43,8 +43,18 @@ export type PrintConfig = {
   xOffsetMm: number;
   yOffsetMm: number;
   dpi: 203 | 300;
+  printDirection?: LabelPrintDirection;
   loopZone?: { edge: 'top' | 'bottom' | 'left' | 'right'; sizeMm: number };
 };
+
+export type LabelPrintDirection = 'normal' | 'rotate-180' | 'mirror-left-right' | 'mirror-top-bottom';
+
+export const LABEL_PRINT_DIRECTION_OPTIONS: Array<{ value: LabelPrintDirection; label: string; description: string }> = [
+  { value: 'normal', label: 'Normal', description: 'Standard label output' },
+  { value: 'rotate-180', label: 'Rotate 180°', description: 'Top becomes bottom' },
+  { value: 'mirror-left-right', label: 'Mirror left/right', description: 'Fixes left and right reversed output' },
+  { value: 'mirror-top-bottom', label: 'Mirror top/bottom', description: 'Fixes vertical reversed output' },
+];
 
 export type LabelTemplateDto = {
   id: string;
@@ -430,6 +440,7 @@ export async function buildPrinterTemplate(draft: LabelTemplateDto) {
     yOffsetMm: draft.printConfig.yOffsetMm,
     gapMm: draft.printConfig.gapMm,
     darkness: draft.printConfig.darkness,
+    printDirection: draft.printConfig.printDirection ?? 'normal',
   };
 }
 

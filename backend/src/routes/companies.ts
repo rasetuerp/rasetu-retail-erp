@@ -173,7 +173,7 @@ companiesRouter.post(
           { id: 'tax-note', type: 'text', content: '(Incl. of all taxes)', xMm: 3, yMm: 51, widthMm: 44, heightMm: 4, fontSize: 6, align: 'center' },
           { id: 'barcode', type: 'barcode', sourceKey: 'item.sku', barcodeType: 'code128', xMm: 3, yMm: 58, widthMm: 44, heightMm: 14 },
         ]),
-        printConfig: JSON.stringify({ darkness: 8, gapMm: 2, xOffsetMm: 0, yOffsetMm: 0, dpi: 203 }),
+        printConfig: JSON.stringify({ darkness: 8, gapMm: 2, xOffsetMm: 0, yOffsetMm: 0, dpi: 203, printDirection: 'normal' }),
       },
     });
 

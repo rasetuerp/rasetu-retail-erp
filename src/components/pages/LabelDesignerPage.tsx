@@ -10,10 +10,12 @@ import {
   buildPrinterPayloadForItem,
   buildFieldOptions,
   defaultElementsForSize,
+  LABEL_PRINT_DIRECTION_OPTIONS,
   PRESET_GALLERY,
   tsplFontPreviewPx,
   type ElementType,
   type DesignElement,
+  type LabelPrintDirection,
   type LabelTemplateDto,
   type LabelPrintItem as Item,
   type LabelPrintCompany,
@@ -66,7 +68,7 @@ function blankTemplate(): LabelTemplateDto {
     widthMm: 63,
     heightMm: 11,
     elements: defaultElementsForSize(63, 11),
-    printConfig: { darkness: 8, gapMm: 2, xOffsetMm: 0, yOffsetMm: 0, dpi: 203 },
+    printConfig: { darkness: 8, gapMm: 2, xOffsetMm: 0, yOffsetMm: 0, dpi: 203, printDirection: 'normal' },
   };
 }
 
@@ -857,6 +859,21 @@ function SetupModal({
           </div>
           <p style={{ fontSize: 10.5, color: color.inkFaint, margin: '0 0 8px' }}>
             If labels print shifted or too light/dark on your printer, nudge these and reprint — no need to touch global printer settings.
+          </p>
+          <label style={{ ...labelStyle, marginBottom: 8 }}>
+            Print direction
+            <select
+              value={draft.printConfig.printDirection ?? 'normal'}
+              onChange={(e) => setDraft((p) => ({ ...p, printConfig: { ...p.printConfig, printDirection: e.target.value as LabelPrintDirection } }))}
+              style={inputStyle}
+            >
+              {LABEL_PRINT_DIRECTION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <p style={{ fontSize: 10.5, color: color.inkFaint, margin: '0 0 8px' }}>
+            If left and right are reversed on the printed label, choose Mirror left/right. If the label is upside down, choose Rotate 180°.
           </p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <label style={labelStyle}>
