@@ -762,7 +762,7 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
     .meta-grid strong{display:block;font-size:${Math.max(9, monoFontPx - 1)}px;font-weight:800;overflow-wrap:anywhere}
     .right{text-align:right}
     .items{width:100%}
-    .item-head,.item-row{display:grid;grid-template-columns:.45fr minmax(0,1fr) .45fr 1fr;gap:.8mm;align-items:start}
+    .item-head,.item-row{display:grid;grid-template-columns:3ch minmax(0,1fr) 4ch 10ch;column-gap:1ch;row-gap:.5mm;align-items:start}
     .item-head{font-size:${Math.max(8, monoFontPx - 2)}px;font-weight:800;margin-bottom:.8mm}
     .item-head span:nth-child(n+3),.item-qty,.num{text-align:right}
     .item-row{padding:.5mm 0}
