@@ -663,23 +663,25 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
     : 'Not recorded';
   const gstRows = receiptGstRows(invoice);
   const itemRows = invoice.items
-    .map((line) => {
+    .map((line, index) => {
       const discount = Number(line.discountPct);
       const meta = [
         line.item.hsn ? `HSN ${line.item.hsn}` : '',
         `GST ${line.gstRate}%`,
-        discount > 0 ? `Disc ${discount.toFixed(2)}%` : '',
       ].filter(Boolean).join(' · ');
       return `<div class="item-row">
+        <div class="item-sno">${index + 1}</div>
         <div class="item-name">${escapeHtml(displayName(line.item))}</div>
         <div class="item-qty">${Number(line.qty)}</div>
-        <div class="num">${money(lineSaleUnitPrice(line))}</div>
+        <div class="num">${money(line.rate)}</div>
+        <div class="num">${discount > 0 ? `${discount.toFixed(2)}%` : '-'}</div>
         <div class="num">${money(lineChargedAmount(line))}</div>
         ${meta ? `<div class="item-meta">${escapeHtml(meta)}</div>` : ''}
       </div>`;
     })
     .join('');
   const totalQty = invoice.items.reduce((sum, line) => sum + Number(line.qty), 0);
+  const totalSavings = receiptTotalSavings(invoice);
   const interState = Number(invoice.igst) > 0;
   const paymentsTotal = invoice.payments?.reduce((sum, p) => sum + Number(p.amount), 0) ?? 0;
   const amountDue = Math.max(0, Number(invoice.total) - paymentsTotal);
@@ -703,7 +705,7 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
       </div>
       <div class="dash"></div>` : '',
     items: `<div class="items">
-        <div class="item-head"><span>Item</span><span>Qty</span><span>Rate</span><span>Amount</span></div>
+        <div class="item-head"><span>S.No.</span><span>Item</span><span>Qty</span><span>MRP</span><span>Disc</span><span>Amount</span></div>
         ${itemRows}
       </div>
       <div class="dash"></div>`,
@@ -726,8 +728,8 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
         </div>
         <div class="dash"></div>`
       : '',
-    savings: enabled.has('savingsLine') && settings.showSavingsLine && Number(invoice.discountAmt) > 0
-      ? `<div class="center small strong">You saved Rs ${Math.round(Number(invoice.discountAmt))} today</div>`
+    savings: enabled.has('savingsLine') && settings.showSavingsLine && totalSavings > 0.004
+      ? `<div class="savings-card"><span>Total saving</span><strong>Rs ${money(totalSavings)}</strong></div>`
       : '',
     custom: enabled.has('customMessage') && settings.customMessageText
       ? `<div class="center small">${escapeHtml(settings.customMessageText).replace(/\n/g, '<br>')}</div>`
@@ -758,12 +760,13 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
     .meta-grid strong{display:block;font-size:${Math.max(9, monoFontPx - 1)}px;font-weight:800;overflow-wrap:anywhere}
     .right{text-align:right}
     .items{width:100%}
-    .item-head,.item-row{display:grid;grid-template-columns:minmax(0,2fr) .45fr .9fr .95fr;gap:1mm;align-items:start}
+    .item-head,.item-row{display:grid;grid-template-columns:.45fr minmax(0,1.55fr) .45fr .85fr .6fr .95fr;gap:.8mm;align-items:start}
     .item-head{font-size:${Math.max(8, monoFontPx - 2)}px;font-weight:800;margin-bottom:.8mm}
-    .item-head span:nth-child(n+2),.item-qty,.num{text-align:right}
+    .item-head span:nth-child(n+3),.item-qty,.num{text-align:right}
     .item-row{padding:.5mm 0}
+    .item-sno{font-weight:800}
     .item-name{overflow-wrap:anywhere}
-    .item-meta{grid-column:1 / -1;font-size:${Math.max(8, monoFontPx - 2)}px;font-weight:700}
+    .item-meta{grid-column:2 / -1;font-size:${Math.max(8, monoFontPx - 2)}px;font-weight:700}
     .totals{display:grid;gap:.7mm}
     .summary-line,.money-row,.paid div{display:flex;justify-content:space-between;gap:2mm}
     .money-row span:last-child,.paid strong{font-weight:800;text-align:right}
@@ -777,6 +780,8 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
     .gst-head span:nth-child(n+2),.gst-row span:nth-child(n+2){text-align:right}
     .small{font-size:${Math.max(8, monoFontPx - 1)}px;line-height:1.32}
     .strong{font-weight:800}
+    .savings-card{display:flex;justify-content:space-between;gap:2mm;border:1px solid #000;margin:1.2mm 0;padding:1mm;font-size:${Math.max(9, monoFontPx - 1)}px;font-weight:800}
+    .savings-card strong{text-align:right}
     .payment-note{display:flex;gap:2mm;align-items:center;justify-content:center;margin:1.5mm 0;font-size:${Math.max(8, monoFontPx - 1)}px;line-height:1.3}
     .qr-box{width:13mm;height:13mm;border:1px solid #000;display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0}
     .policy{margin-top:1mm}
@@ -785,7 +790,7 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
     .cut{display:flex;align-items:center;gap:1mm;margin-top:2mm;font:800 9px/1.2 Arial,sans-serif;color:#000}
     .cut:before,.cut:after{content:"";flex:1;border-top:1px dashed #000}
     .feed{height:${feedMm}mm}
-  </style></head><body><div class="receipt">${sections.header}${sections.customer}${sections.items}${sections.totals}${sections.paidLine}${sections.words}${sections.gst}${sections.savings}${sections.custom}${sections.payment}${sections.exchange}${sections.cashier}${sections.footer}<div class="cut">CUT HERE</div><div class="feed"></div></div></body></html>`;
+  </style></head><body><div class="receipt">${sections.header}${sections.customer}${sections.items}${sections.totals}${sections.savings}${sections.paidLine}${sections.words}${sections.gst}${sections.custom}${sections.payment}${sections.exchange}${sections.cashier}${sections.footer}<div class="cut">CUT HERE</div><div class="feed"></div></div></body></html>`;
 }
 
 function receiptHtmlMetrics(settings: ReceiptSettings): { paperMm: number; contentMm: number; sideMarginMm: number; monoFontPx: number } {
@@ -835,6 +840,16 @@ function receiptGstRows(inv: PrintableInvoice): string {
         : `<div class="gst-row"><span>${escapeHtml(rate)}%</span><span>${taxable.toFixed(2)}</span><span>${(gstAmt / 2).toFixed(2)}</span><span>${(gstAmt / 2).toFixed(2)}</span></div>`;
     })
     .join('');
+}
+
+function receiptTotalSavings(inv: PrintableInvoice): number {
+  const itemSavings = inv.items.reduce((sum, line) => {
+    const qty = Number(line.qty) || 0;
+    const mrp = Number(line.rate) || 0;
+    const saleUnit = lineSaleUnitPrice(line);
+    return sum + Math.max(0, mrp - saleUnit) * qty;
+  }, 0);
+  return itemSavings + Math.max(0, Number(inv.discountAmt) || 0);
 }
 
 export function buildReceiptCalibrationHtml(settings: ReceiptSettings = DEFAULT_RECEIPT_SETTINGS): string {
