@@ -666,12 +666,8 @@ export function buildThermalReceiptHtml(invoice: PrintableInvoice, layout: Therm
   const itemRows = invoice.items
     .map((line, index) => {
       const discount = Number(line.discountPct);
-      const gstRate = Number(line.gstRate);
       const taxable = Number(line.amount);
-      const gstValue = taxable * (gstRate / 100);
-      const taxDetail = interState
-        ? `GST ${line.gstRate}% (${money(gstValue)}) on ${money(taxable)}`
-        : `GST ${line.gstRate}% (C ${money(gstValue / 2)} + S ${money(gstValue / 2)}) on ${money(taxable)}`;
+      const taxDetail = `GST ${line.gstRate}% on ${money(taxable)}`;
       const priceDetail = [
         line.item.hsn ? `HSN ${line.item.hsn}` : '',
         `MRP ${money(line.rate)}`,
